@@ -1,0 +1,11 @@
+{
+  "identifier": "default",
+  "description": "Default capability for OpenSession",
+  "windows": ["*"],
+  "permissions": [
+    "core:default",
+    "shell:allow-execute",
+    "shell:allow-open",
+    "dialog:default"
+  ]
+}

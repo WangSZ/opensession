@@ -1,0 +1,40 @@
+{
+  "name": "opensession",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Visual session manager for opencode — browse, search, and resume AI coding sessions",
+  "license": "MIT",
+  "author": "OpenSession Contributors",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/WangSZ/opensession"
+  },
+  "homepage": "https://github.com/WangSZ/opensession",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2",
+    "@tauri-apps/plugin-dialog": "^2",
+    "@tauri-apps/plugin-shell": "^2",
+    "react": "^19",
+    "react-dom": "^19",
+    "lucide-react": "^0.400",
+    "@tanstack/react-virtual": "^3"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@vitejs/plugin-react": "^4",
+    "autoprefixer": "^10",
+    "postcss": "^8",
+    "tailwindcss": "^3",
+    "typescript": "^5.5",
+    "vite": "^6"
+  }
+}
