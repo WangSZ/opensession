@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { Search, Bug, Plus, Loader2, EyeOff, Eye } from "lucide-react";
+import { Search, Bug, Loader2, EyeOff, Eye } from "lucide-react";
 import IssueCard from "./IssueCard";
 import type { IssueWithSessions } from "../types";
 
@@ -8,14 +8,13 @@ interface Props {
   loading: boolean;
   selectedIssueId: string | null;
   onSelectIssue: (issue: IssueWithSessions) => void;
-  onCreateIssue: () => void;
   onContextMenu?: (e: React.MouseEvent, issue: IssueWithSessions) => void;
 }
 
 const CLOSED_STATUSES = new Set(["closed", "wont_fix"]);
 
 export default function IssueSection({
-  issues, loading, selectedIssueId, onSelectIssue, onCreateIssue, onContextMenu,
+  issues, loading, selectedIssueId, onSelectIssue, onContextMenu,
 }: Props) {
   const [search, setSearch] = useState("");
   const [showClosed, setShowClosed] = useState(false);
@@ -46,18 +45,11 @@ export default function IssueSection({
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" size={14} />
           <input
-            className="w-full bg-surface-hover text-gray-200 rounded-lg pl-8 pr-9 py-1.5 text-xs border border-surface-border focus:border-indigo-500 focus:outline-none transition-colors"
+            className="w-full bg-surface-hover text-gray-200 rounded-lg pl-8 pr-3 py-1.5 text-xs border border-surface-border focus:border-indigo-500 focus:outline-none transition-colors"
             placeholder="Search issues..."
             value={search}
             onChange={e => setSearch(e.target.value)}
           />
-          <button
-            onClick={onCreateIssue}
-            className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-indigo-400 transition-colors p-0.5"
-            title="新建 Issue"
-          >
-            <Plus size={15} />
-          </button>
         </div>
         {closedCount > 0 && (
           <button

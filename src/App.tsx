@@ -12,6 +12,8 @@ import EditSummaryModal from "./components/EditSummaryModal";
 import ConfirmDialog from "./components/ConfirmDialog";
 import WorktreeModal from "./components/WorktreeModal";
 import IssueModal from "./components/IssueModal";
+import NewIssueWithDirModal from "./components/NewIssueWithDirModal";
+import { invoke } from "@tauri-apps/api/core";
 import { ask, open } from "@tauri-apps/plugin-dialog";
 import { Database, Terminal, FolderOpen, Pin, Tag, EyeOff, Sparkles, GitBranch, GitFork, Play, Copy, Info, Bug, Pencil, Trash2, CodeXml, Braces } from "lucide-react";
 import type { DirectoryGroup, Session, SessionDetail as SessionDetailType, Summary, Issue, IssueWithSessions } from "./types";
@@ -58,6 +60,7 @@ function App() {
   const [highlightedSessionId, setHighlightedSessionId] = useState<string | null>(null);
   const [issueCtxMenu, setIssueCtxMenu] = useState<{ issue: IssueWithSessions; x: number; y: number } | null>(null);
   const [selectedIssue, setSelectedIssue] = useState<IssueWithSessions | null>(null);
+  const [newIssueWithDirModal, setNewIssueWithDirModal] = useState(false);
 
   const sessionIssueMap = useMemo(() => {
     const map: Record<string, Issue> = {};
@@ -186,6 +189,16 @@ function App() {
         setError(msg);
       }
     }
+  }
+
+  async function handleNewDirectory() {
+    const path = await open({
+      directory: true,
+      multiple: false,
+      title: "选择目录",
+    });
+    if (!path) return;
+    await handleOpenInTerminal(path);
   }
 
   async function handleForkSession(directory: string, sessionId: string) {
@@ -428,20 +441,33 @@ function App() {
     }
   }
 
-  async function handleCreateNewIssue() {
-    setEditIssueModal({
-      issue: { id: "", title: "", description: null, url: null, priority: "medium", status: "open", deadline: null, created_at: "", updated_at: "" },
-      sessions: [],
-    });
+  async function handleCreateIssueWithDir(title: string, description: string | null, priority: string, status: string, deadline: string | null, directory: string) {
+    try {
+      const issue = await createIssue(title, description, null, priority, status, deadline);
+      await openInTerminal(directory);
+      const startTime = Date.now();
+      while (Date.now() - startTime < 30000) {
+        await new Promise(r => setTimeout(r, 1000));
+        try {
+          const sessions = await invoke<Session[]>("get_sessions", { directory });
+          const newSession = sessions.find(s =>
+            new Date(s.time_created).getTime() > startTime
+          );
+          if (newSession) {
+            await linkSessionToIssue(newSession.id, issue.id, directory);
+            break;
+          }
+        } catch { }
+      }
+      await Promise.all([loadIssues(), loadDirectories()]);
+    } catch (e) {
+      setError(String(e));
+    }
   }
 
   async function handleSaveEditIssue(issueId: string, title: string, description?: string | null, url?: string | null, priority?: string | null, status?: string | null, deadline?: string | null) {
     try {
-      if (issueId) {
-        await updateIssue(issueId, title, description ?? null, url ?? null, priority ?? null, status ?? null, deadline ?? null);
-      } else {
-        await createIssue(title, description ?? null, url ?? null, priority ?? null, status ?? null, deadline ?? null);
-      }
+      await updateIssue(issueId, title, description ?? null, url ?? null, priority ?? null, status ?? null, deadline ?? null);
       await loadIssues();
     } catch (e) {
       setError(String(e));
@@ -758,8 +784,9 @@ function App() {
         loadingIssues={loadingIssues}
         selectedIssueId={selectedIssue?.issue.id ?? null}
         onSelectIssue={handleSelectIssue}
-        onCreateIssue={handleCreateNewIssue}
+        onCreateIssue={() => setNewIssueWithDirModal(true)}
         onIssueContextMenu={handleIssueContextOpen}
+        onNewDirectory={handleNewDirectory}
       />
       {dbNotFound ? (
         <div className="flex-1 flex items-center justify-center">
@@ -896,6 +923,12 @@ function App() {
           onClose={() => setEditIssueModal(null)}
         />
       )}
+      {newIssueWithDirModal && (
+        <NewIssueWithDirModal
+          onCreate={handleCreateIssueWithDir}
+          onClose={() => setNewIssueWithDirModal(false)}
+        />
+      )}
       {confirmDeleteIssue !== null && (
         <ConfirmDialog
           title="删除 Issue"
@@ -941,7 +974,7 @@ function EditIssueModal({ issue, onSave, onClose }: {
         className="bg-surface-card border border-surface-border rounded-xl shadow-2xl shadow-black/40 w-[400px] p-4"
         onClick={e => e.stopPropagation()}
       >
-        <h3 className="text-sm font-medium mb-3">{issue.issue.id ? "编辑 Issue" : "新建 Issue"}</h3>
+        <h3 className="text-sm font-medium mb-3">编辑 Issue</h3>
         <input
           className="w-full bg-surface-hover text-gray-200 rounded-lg px-3 py-2 text-sm border border-surface-border focus:border-indigo-500 focus:outline-none transition-colors mb-2"
           placeholder="Issue 标题"
@@ -1018,7 +1051,7 @@ function EditIssueModal({ issue, onSave, onClose }: {
             disabled={!title.trim()}
             className="px-3 py-1.5 text-xs bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white rounded-md transition-colors"
           >
-            {issue.issue.id ? "保存" : "创建"}
+            {"保存"}
           </button>
         </div>
       </div>

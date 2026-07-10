@@ -1,4 +1,4 @@
-import { Search, FolderKanban, Loader2, Eye, EyeOff, Bug } from "lucide-react";
+import { Search, FolderKanban, Loader2, Eye, EyeOff, Bug, Plus } from "lucide-react";
 import DirectoryCard from "./DirectoryCard";
 import IssueSection from "./IssueSection";
 import type { DirectoryGroup, IssueWithSessions } from "../types";
@@ -29,6 +29,7 @@ interface Props {
   onSelectIssue: (issue: IssueWithSessions) => void;
   onCreateIssue: () => void;
   onIssueContextMenu?: (e: React.MouseEvent, issue: IssueWithSessions) => void;
+  onNewDirectory: () => void;
 }
 
 export default function Sidebar({
@@ -39,6 +40,7 @@ export default function Sidebar({
   showHidden, onToggleShowHidden,
   sidebarView, onViewChange, issues, loadingIssues,
   selectedIssueId, onSelectIssue, onCreateIssue, onIssueContextMenu,
+  onNewDirectory,
 }: Props) {
   return (
     <aside className="w-72 flex-shrink-0 border-r border-surface-border bg-surface-card flex flex-col">
@@ -65,6 +67,23 @@ export default function Sidebar({
           <Bug size={14} />
           Issues {issues.length > 0 && <span className="text-gray-600 font-normal">({issues.length})</span>}
         </button>
+        {sidebarView === "dirs" ? (
+          <button
+            className="px-3 text-gray-500 hover:text-gray-300 hover:bg-surface-hover transition-colors flex items-center justify-center"
+            onClick={onNewDirectory}
+            title="新建目录"
+          >
+            <Plus size={16} />
+          </button>
+        ) : (
+          <button
+            className="px-3 text-gray-500 hover:text-gray-300 hover:bg-surface-hover transition-colors flex items-center justify-center"
+            onClick={onCreateIssue}
+            title="新建 Issue"
+          >
+            <Plus size={16} />
+          </button>
+        )}
       </div>
 
       {sidebarView === "issues" ? (
@@ -73,7 +92,6 @@ export default function Sidebar({
           loading={loadingIssues}
           selectedIssueId={selectedIssueId}
           onSelectIssue={onSelectIssue}
-          onCreateIssue={onCreateIssue}
           onContextMenu={onIssueContextMenu}
         />
       ) : (
