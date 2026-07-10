@@ -2,6 +2,22 @@ use std::path::PathBuf;
 use std::sync::OnceLock;
 
 fn resolve_opencode_data_dir() -> PathBuf {
+    // Fast path: check standard locations first (no CLI call, ~instant)
+    if let Ok(dir) = std::env::var("XDG_DATA_HOME") {
+        let p = PathBuf::from(dir);
+        if p.join("opencode").join("opencode.db").exists() {
+            return p;
+        }
+    }
+
+    if let Some(home) = dirs::home_dir() {
+        let p = home.join(".local").join("share");
+        if p.join("opencode").join("opencode.db").exists() {
+            return p;
+        }
+    }
+
+    // Slow path: ask the opencode CLI (~0.5s, only if fast path missed)
     if let Ok(output) = std::process::Command::new("opencode")
         .args(["db", "path"])
         .output()
@@ -14,20 +30,6 @@ fn resolve_opencode_data_dir() -> PathBuf {
                     return data_dir.to_path_buf();
                 }
             }
-        }
-    }
-
-    if let Ok(dir) = std::env::var("XDG_DATA_HOME") {
-        let p = PathBuf::from(dir);
-        if p.join("opencode").join("opencode.db").exists() {
-            return p;
-        }
-    }
-
-    if let Some(home) = dirs::home_dir() {
-        let p = home.join(".local").join("share");
-        if p.join("opencode").join("opencode.db").exists() {
-            return p;
         }
     }
 

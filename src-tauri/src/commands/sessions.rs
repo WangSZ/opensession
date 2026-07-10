@@ -8,8 +8,7 @@ use super::meta;
 pub async fn list_directories(app: tauri::AppHandle) -> Result<Vec<DirectoryGroup>, String> {
     let mut groups = db::list_directory_groups()?;
     meta::merge_into(&mut groups);
-    let stale = git_info::apply_cached(&mut groups);
-    git_info::auto_hide_missing_worktrees(&mut groups);
+    let stale = git_info::apply_cached_and_hide(&mut groups);
     if !stale.is_empty() {
         git_info::spawn_refresh(app, stale);
     }
@@ -23,8 +22,7 @@ pub async fn search_directories(
 ) -> Result<Vec<DirectoryGroup>, String> {
     let mut groups = db::list_directory_groups()?;
     meta::merge_into(&mut groups);
-    git_info::apply_cached(&mut groups);
-    git_info::auto_hide_missing_worktrees(&mut groups);
+    git_info::apply_cached_and_hide(&mut groups);
     let query_lower = query.to_lowercase();
     Ok(groups
         .into_iter()

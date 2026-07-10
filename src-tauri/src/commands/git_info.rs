@@ -62,16 +62,41 @@ fn infer_from_path(path: &str) -> (Option<String>, Option<String>) {
     (repo, branch)
 }
 
-/// 同步快路径：读缓存 + stat .git → 填充 is_git_repo / is_worktree / repo_name / branch_name
+/// 同步快路径：读缓存（仅一次）+ stat .git → 填充 is_git_repo / is_worktree / repo_name / branch_name
+/// 同时自动隐藏已删除的 worktree（missing 目录在缓存中有记录则视为失效 worktree）
 /// 返回需要后台修正的目录路径列表（cache miss 的 worktree）
-pub fn apply_cached(groups: &mut Vec<DirectoryGroup>) -> Vec<String> {
+pub fn apply_cached_and_hide(groups: &mut Vec<DirectoryGroup>) -> Vec<String> {
     let cache = load();
+
+    // 空缓存快速分支：设置 git 信息 + 收集所有 worktree 为 stale
+    if cache.is_empty() {
+        let mut stale = Vec::new();
+        for g in groups.iter_mut() {
+            let git_path = std::path::Path::new(&g.path).join(".git");
+            g.is_git_repo = git_path.exists();
+            if g.is_git_repo && git_path.is_file() {
+                g.is_worktree = true;
+                let (repo, branch) = infer_from_path(&g.path);
+                g.repo_name = repo;
+                g.branch_name = branch;
+                stale.push(g.path.clone());
+            }
+        }
+        return stale;
+    }
+
     let mut stale = Vec::new();
+    let mut to_hide = Vec::new();
 
     for g in groups.iter_mut() {
         let git_path = std::path::Path::new(&g.path).join(".git");
         if !git_path.exists() {
             g.is_git_repo = false;
+            // missing 目录在缓存中有记录 → 失效 worktree，自动隐藏
+            if g.is_missing && cache.contains_key(&g.path) {
+                g.hidden = true;
+                to_hide.push(g.path.clone());
+            }
             continue;
         }
         g.is_git_repo = true;
@@ -96,38 +121,16 @@ pub fn apply_cached(groups: &mut Vec<DirectoryGroup>) -> Vec<String> {
         stale.push(g.path.clone());
     }
 
+    if !to_hide.is_empty() {
+        let mut cache = cache;
+        for p in &to_hide {
+            cache.remove(p);
+        }
+        save(&cache);
+        super::meta::mark_hidden(&to_hide);
+    }
+
     stale
-}
-
-/// 自动隐藏已删除的 worktree 目录：missng 目录在 git_info 缓存中有记录则视为失效 worktree
-pub fn auto_hide_missing_worktrees(groups: &mut Vec<DirectoryGroup>) {
-    let cache = load();
-    if cache.is_empty() {
-        return;
-    }
-
-    let mut to_hide = Vec::new();
-
-    for g in groups.iter_mut() {
-        if !g.is_missing {
-            continue;
-        }
-        if cache.contains_key(&g.path) {
-            g.hidden = true;
-            to_hide.push(g.path.clone());
-        }
-    }
-
-    if to_hide.is_empty() {
-        return;
-    }
-
-    let mut cache = cache;
-    for p in &to_hide {
-        cache.remove(p);
-    }
-    save(&cache);
-    super::meta::mark_hidden(&to_hide);
 }
 
 /// 从缓存中移除指定路径的条目
