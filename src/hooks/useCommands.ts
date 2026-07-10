@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { DirectoryGroup, Session, SessionDetail, Issue, IssueWithSessions, IssueComment } from "../types";
+import type { DirectoryGroup, Session, SessionDetail, Summary, Issue, IssueWithSessions, IssueComment } from "../types";
 
 export function useCommands(onAfterCommand?: () => void) {
   async function wrap<T>(fn: () => Promise<T>): Promise<T> {
@@ -13,6 +13,10 @@ export function useCommands(onAfterCommand?: () => void) {
     getSessions: (directory: string) => wrap(() => invoke<Session[]>("get_sessions", { directory })),
     getSessionDetail: (sessionId: string) => wrap(() => invoke<SessionDetail>("get_session_detail", { sessionId })),
     generateSummary: (directory: string) => invoke<void>("generate_summary", { directory }),
+    setCachedSummary: (directory: string, summary: Summary) =>
+      wrap(() => invoke<void>("set_cached_summary", { directory, summary })),
+    deleteCachedSummary: (directory: string) =>
+      wrap(() => invoke<void>("delete_cached_summary", { directory })),
     openInTerminal: (directory: string, sessionId?: string) =>
       invoke<void>("open_in_terminal", { directory, sessionId: sessionId ?? null }),
     forkSession: (directory: string, sessionId: string) =>

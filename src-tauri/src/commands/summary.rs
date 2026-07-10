@@ -106,6 +106,44 @@ pub async fn generate_summary(app: tauri::AppHandle, directory: String) -> Resul
 }
 
 #[tauri::command]
+pub fn set_cached_summary(directory: String, summary: Summary) -> Result<(), String> {
+    let data_dir = crate::config::app_data_dir();
+    std::fs::create_dir_all(&data_dir).map_err(|e| format!("Failed to create data dir: {}", e))?;
+    let cache_path = data_dir.join("summaries.json");
+    let mut summaries: HashMap<String, Summary> = if cache_path.exists() {
+        std::fs::read_to_string(&cache_path)
+            .ok()
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default()
+    } else {
+        HashMap::new()
+    };
+    summaries.insert(directory, summary);
+    serde_json::to_string_pretty(&summaries)
+        .map_err(|e| format!("Failed to serialize: {}", e))
+        .and_then(|json| {
+            std::fs::write(&cache_path, json).map_err(|e| format!("Failed to write cache: {}", e))
+        })
+}
+
+#[tauri::command]
+pub fn delete_cached_summary(directory: String) -> Result<(), String> {
+    let cache_path = crate::config::app_data_dir().join("summaries.json");
+    if !cache_path.exists() {
+        return Ok(());
+    }
+    let mut summaries: HashMap<String, Summary> = std::fs::read_to_string(&cache_path)
+        .map_err(|e| format!("Failed to read cache: {}", e))
+        .and_then(|s| serde_json::from_str(&s).map_err(|e| format!("Failed to parse cache: {}", e)))?;
+    summaries.remove(&directory);
+    serde_json::to_string_pretty(&summaries)
+        .map_err(|e| format!("Failed to serialize: {}", e))
+        .and_then(|json| {
+            std::fs::write(&cache_path, json).map_err(|e| format!("Failed to write cache: {}", e))
+        })
+}
+
+#[tauri::command]
 pub fn get_cached_summary(directory: String) -> Result<Option<Summary>, String> {
     let cache_path = crate::config::app_data_dir().join("summaries.json");
     if !cache_path.exists() {

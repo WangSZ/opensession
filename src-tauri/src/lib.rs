@@ -26,6 +26,8 @@ pub fn run() {
             commands::sessions::search_directories,
             commands::summary::generate_summary,
             commands::summary::get_cached_summary,
+            commands::summary::set_cached_summary,
+            commands::summary::delete_cached_summary,
             commands::terminal::open_in_terminal,
             commands::terminal::fork_session,
             commands::terminal::bootstrap_session,

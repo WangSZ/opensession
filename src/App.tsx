@@ -8,6 +8,7 @@ import IssueDetail from "./components/IssueDetail";
 import ContextMenu from "./components/ContextMenu";
 import type { MenuItem } from "./components/ContextMenu";
 import NewTagModal from "./components/NewTagModal";
+import EditSummaryModal from "./components/EditSummaryModal";
 import ConfirmDialog from "./components/ConfirmDialog";
 import WorktreeModal from "./components/WorktreeModal";
 import IssueModal from "./components/IssueModal";
@@ -21,6 +22,7 @@ type SidebarView = "dirs" | "issues";
 function App() {
   const {
     listDirectories, getSessions, getSessionDetail, generateSummary,
+    setCachedSummary, deleteCachedSummary,
     openInTerminal, forkSession, setDirectoryTags, deleteTagGlobal, togglePin, openInFileManager, openInVSCode, openInJetBrains,
     toggleHidden, bootstrapSession, renameDirectoryMeta, openWorktree, removeWorktree,
     toggleSessionHidden, toggleSessionPin,
@@ -41,6 +43,7 @@ function App() {
   const [ctxMenu, setCtxMenu] = useState<{ path: string; x: number; y: number } | null>(null);
   const [newTagModal, setNewTagModal] = useState<string | null>(null);
   const [confirmDeleteTag, setConfirmDeleteTag] = useState<string | null>(null);
+  const [editSummaryModal, setEditSummaryModal] = useState<{ path: string; summary: Summary } | null>(null);
   const [worktreeModal, setWorktreeModal] = useState<{ path: string; defaultName: string } | null>(null);
   const [confirmRemoveWorktree, setConfirmRemoveWorktree] = useState<string | null>(null);
   const [sessionCtxMenu, setSessionCtxMenu] = useState<{ sessionId: string; x: number; y: number } | null>(null);
@@ -144,6 +147,32 @@ function App() {
   function handleGenerateSummary(directory: string) {
     setGeneratingDirs(prev => new Set(prev).add(directory));
     generateSummary(directory).catch(e => setError(String(e)));
+  }
+
+  async function handleSaveSummary(title: string, description: string) {
+    if (!editSummaryModal) return;
+    const summary: Summary = {
+      title,
+      description,
+      generated_at: new Date().toISOString(),
+    };
+    try {
+      await setCachedSummary(editSummaryModal.path, summary);
+    } catch (e) {
+      setError(String(e));
+    }
+    setEditSummaryModal(null);
+  }
+
+  async function handleDeleteSummary() {
+    if (!editSummaryModal) return;
+    const path = editSummaryModal.path;
+    setEditSummaryModal(null);
+    try {
+      await deleteCachedSummary(path);
+    } catch (e) {
+      setError(String(e));
+    }
   }
 
   async function handleOpenInTerminal(directory: string, sessionId?: string) {
@@ -650,6 +679,14 @@ function App() {
         onClick: () => handleGenerateSummary(dirPath),
         disabled: generatingDirs.has(dirPath),
       },
+      ...(dir.summary
+        ? [{
+            type: "item" as const,
+            label: "编辑摘要",
+            icon: <Pencil size={14} />,
+            onClick: () => setEditSummaryModal({ path: dirPath, summary: dir.summary! }),
+          }]
+        : []),
       { type: "separator" as const },
       {
         type: "item" as const,
@@ -819,6 +856,15 @@ function App() {
             setNewTagModal(null);
           }}
           onClose={() => setNewTagModal(null)}
+        />
+      )}
+      {editSummaryModal !== null && (
+        <EditSummaryModal
+          title={editSummaryModal.summary.title}
+          description={editSummaryModal.summary.description}
+          onSave={handleSaveSummary}
+          onDelete={handleDeleteSummary}
+          onClose={() => setEditSummaryModal(null)}
         />
       )}
       {confirmDeleteTag !== null && (
