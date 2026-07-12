@@ -4,7 +4,7 @@ interface Props {
   title: string;
   description: string;
   onSave: (title: string, description: string) => void;
-  onDelete: () => void;
+  onDelete?: () => void;
   onClose: () => void;
 }
 
@@ -45,12 +45,15 @@ export default function EditSummaryModal({ title: initialTitle, description: ini
           rows={4}
         />
         <div className="flex justify-between items-center">
-          <button
-            className="px-3 py-1.5 text-sm text-red-400 hover:text-red-300 transition-colors"
-            onClick={onDelete}
-          >
-            删除摘要
-          </button>
+          {onDelete && (
+            <button
+              className="px-3 py-1.5 text-sm text-red-400 hover:text-red-300 transition-colors"
+              onClick={onDelete}
+            >
+              删除摘要
+            </button>
+          )}
+          {!onDelete && <div />}
           <div className="flex gap-2">
             <button
               className="px-3 py-1.5 text-sm text-gray-400 hover:text-gray-200 transition-colors"

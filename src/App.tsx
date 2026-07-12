@@ -45,7 +45,7 @@ function App() {
   const [ctxMenu, setCtxMenu] = useState<{ path: string; x: number; y: number } | null>(null);
   const [newTagModal, setNewTagModal] = useState<string | null>(null);
   const [confirmDeleteTag, setConfirmDeleteTag] = useState<string | null>(null);
-  const [editSummaryModal, setEditSummaryModal] = useState<{ path: string; summary: Summary } | null>(null);
+  const [editSummaryModal, setEditSummaryModal] = useState<{ path: string; summary: Summary | null } | null>(null);
   const [worktreeModal, setWorktreeModal] = useState<{ path: string; defaultName: string } | null>(null);
   const [confirmRemoveWorktree, setConfirmRemoveWorktree] = useState<string | null>(null);
   const [sessionCtxMenu, setSessionCtxMenu] = useState<{ sessionId: string; x: number; y: number } | null>(null);
@@ -705,14 +705,12 @@ function App() {
         onClick: () => handleGenerateSummary(dirPath),
         disabled: generatingDirs.has(dirPath),
       },
-      ...(dir.summary
-        ? [{
-            type: "item" as const,
-            label: "编辑摘要",
-            icon: <Pencil size={14} />,
-            onClick: () => setEditSummaryModal({ path: dirPath, summary: dir.summary! }),
-          }]
-        : []),
+      {
+        type: "item" as const,
+        label: "编辑摘要",
+        icon: <Pencil size={14} />,
+        onClick: () => setEditSummaryModal({ path: dirPath, summary: dir.summary ?? null }),
+      },
       { type: "separator" as const },
       {
         type: "item" as const,
@@ -887,10 +885,10 @@ function App() {
       )}
       {editSummaryModal !== null && (
         <EditSummaryModal
-          title={editSummaryModal.summary.title}
-          description={editSummaryModal.summary.description}
+          title={editSummaryModal.summary?.title ?? ""}
+          description={editSummaryModal.summary?.description ?? ""}
           onSave={handleSaveSummary}
-          onDelete={handleDeleteSummary}
+          onDelete={editSummaryModal.summary ? handleDeleteSummary : undefined}
           onClose={() => setEditSummaryModal(null)}
         />
       )}
