@@ -6,6 +6,7 @@ import SessionPanel from "./components/SessionPanel";
 import SessionDetail from "./components/SessionDetail";
 import IssueDetail from "./components/IssueDetail";
 import ContextMenu from "./components/ContextMenu";
+import TitleBar from "./components/TitleBar";
 import type { MenuItem } from "./components/ContextMenu";
 import NewTagModal from "./components/NewTagModal";
 import EditSummaryModal from "./components/EditSummaryModal";
@@ -14,6 +15,7 @@ import WorktreeModal from "./components/WorktreeModal";
 import IssueModal from "./components/IssueModal";
 import NewIssueWithDirModal from "./components/NewIssueWithDirModal";
 import { invoke } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { ask, open } from "@tauri-apps/plugin-dialog";
 import { Database, Terminal, FolderOpen, Pin, Tag, EyeOff, Sparkles, GitBranch, GitFork, Play, Copy, Info, Bug, Pencil, Trash2, CodeXml, Braces } from "lucide-react";
 import type { DirectoryGroup, Session, SessionDetail as SessionDetailType, Summary, Issue, IssueWithSessions } from "./types";
@@ -87,6 +89,17 @@ function App() {
     const onFocus = () => loadDirectories();
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
+  }, []);
+
+  useEffect(() => {
+    function handleKey(e: KeyboardEvent) {
+      if ((e.metaKey || e.ctrlKey) && e.key === "w") {
+        e.preventDefault();
+        getCurrentWindow().close();
+      }
+    }
+    document.addEventListener("keydown", handleKey);
+    return () => document.removeEventListener("keydown", handleKey);
   }, []);
 
   async function loadDirectories() {
@@ -760,7 +773,9 @@ function App() {
   }, [ctxDir, allTags]);
 
   return (
-    <div className="flex h-screen bg-surface text-gray-100 overflow-hidden">
+    <div className="flex flex-col h-screen bg-surface text-gray-100 rounded-[10px] overflow-hidden">
+      <TitleBar />
+      <div className="flex flex-1 overflow-hidden">
       <Sidebar
         directories={filteredDirs}
         selectedDir={selectedDir}
@@ -938,6 +953,7 @@ function App() {
           onClose={() => setConfirmDeleteIssue(null)}
         />
       )}
+      </div>
       {error && (
         <div className="fixed bottom-4 right-4 bg-red-600 text-white px-4 py-2 rounded-lg shadow-lg text-sm">
           {error}

@@ -46,7 +46,7 @@ export default function Sidebar({
     <aside className="w-72 flex-shrink-0 border-r border-surface-border bg-surface-card flex flex-col">
       <div className="flex border-b border-surface-border">
         <button
-          className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium transition-colors ${
+          className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-3 text-xs font-medium transition-colors ${
             sidebarView === "dirs"
               ? "text-indigo-400 border-b-2 border-indigo-500 bg-surface-hover"
               : "text-gray-500 hover:text-gray-300"
@@ -57,7 +57,7 @@ export default function Sidebar({
           目录
         </button>
         <button
-          className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium transition-colors ${
+          className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-3 text-xs font-medium transition-colors ${
             sidebarView === "issues"
               ? "text-indigo-400 border-b-2 border-indigo-500 bg-surface-hover"
               : "text-gray-500 hover:text-gray-300"
@@ -98,9 +98,9 @@ export default function Sidebar({
         <>
           <div className="p-3 border-b border-surface-border space-y-2">
             <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" size={16} />
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" size={14} />
               <input
-                className="w-full bg-surface-hover text-gray-200 rounded-lg pl-9 pr-9 py-2 text-sm border border-surface-border focus:border-indigo-500 focus:outline-none transition-colors"
+                className="w-full bg-surface-hover text-gray-200 rounded-lg pl-8 pr-9 py-1.5 text-xs border border-surface-border focus:border-indigo-500 focus:outline-none transition-colors"
                 placeholder="Search directories..."
                 value={searchQuery}
                 onChange={e => onSearchChange(e.target.value)}
