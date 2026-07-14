@@ -1,4 +1,4 @@
-import { FolderKanban, Terminal, Loader2, Pin, AlertCircle, EyeOff } from "lucide-react";
+import { FolderKanban, Terminal, Loader2, Pin, AlertCircle, EyeOff, Bug } from "lucide-react";
 import type { DirectoryGroup } from "../types";
 
 const MAX_VISIBLE_TAGS = 3;
@@ -10,10 +10,12 @@ interface Props {
   onSelect: () => void;
   onOpen: () => void;
   onContextMenuOpen: (path: string, x: number, y: number) => void;
+  issueTitle?: string | null;
+  onIssueClick?: () => void;
 }
 
 export default function DirectoryCard({
-  directory, isSelected, isGenerating, onSelect, onOpen, onContextMenuOpen,
+  directory, isSelected, isGenerating, onSelect, onOpen, onContextMenuOpen, issueTitle, onIssueClick,
 }: Props) {
   const displayName = directory.is_worktree
     ? `${directory.repo_name ?? directory.name} (${directory.branch_name ?? directory.name})`
@@ -35,6 +37,15 @@ export default function DirectoryCard({
           <span className="font-medium text-sm truncate">{displayName}</span>
           {directory.pinned && <Pin size={12} className="text-amber-400 flex-shrink-0" />}
           {directory.hidden && <EyeOff size={12} className="text-gray-500 flex-shrink-0" />}
+          {issueTitle && (
+            <button
+              onClick={e => { e.stopPropagation(); onIssueClick?.(); }}
+              className="text-amber-400 hover:text-amber-300 transition-colors flex-shrink-0"
+              title={issueTitle}
+            >
+              <Bug size={13} />
+            </button>
+          )}
           {directory.is_missing && (
             <span className="text-xs text-red-400 flex items-center gap-1 flex-shrink-0" title="目录已不存在">
               <AlertCircle size={12} />

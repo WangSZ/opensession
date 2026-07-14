@@ -13,10 +13,11 @@ interface Props {
   onDetail: (sessionId: string) => void;
   onContextMenu: (sessionId: string, x: number, y: number) => void;
   sessionIssueMap?: Record<string, Issue>;
+  dirIssueMap?: Record<string, Issue>;
   highlightedSessionId?: string | null;
 }
 
-export default function SessionPanel({ directory, sessions, loading, onResume, onDetail, onContextMenu, sessionIssueMap, highlightedSessionId }: Props) {
+export default function SessionPanel({ directory, sessions, loading, onResume, onDetail, onContextMenu, sessionIssueMap, dirIssueMap, highlightedSessionId }: Props) {
   const [searchQuery, setSearchQuery] = useState("");
   const [showHidden, setShowHidden] = useState(false);
   const parentRef = useRef<HTMLDivElement>(null);
@@ -128,7 +129,7 @@ export default function SessionPanel({ directory, sessions, loading, onResume, o
                     e.preventDefault();
                     onContextMenu(filteredSessions[item.index].id, e.clientX, e.clientY);
                   }}
-                  issue={sessionIssueMap?.[filteredSessions[item.index].id]}
+                  issue={sessionIssueMap?.[filteredSessions[item.index].id] ?? dirIssueMap?.[directory] ?? null}
                   highlighted={highlightedSessionId === filteredSessions[item.index].id}
                 />
               </div>

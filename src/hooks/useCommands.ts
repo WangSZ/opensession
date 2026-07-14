@@ -69,5 +69,11 @@ export function useCommands(onAfterCommand?: () => void) {
       wrap(() => invoke<void>("delete_comment", { issueId, commentId })),
     getIssueComments: (issueId: string) =>
       invoke<IssueComment[]>("get_issue_comments", { issueId }),
+    linkDirectoryToIssue: (directory: string, issueId: string) =>
+      wrap(() => invoke<void>("link_directory_to_issue", { directory, issueId })),
+    unlinkDirectoryFromIssue: (directory: string) =>
+      wrap(() => invoke<void>("unlink_directory_from_issue", { directory })),
+    getDirectoryIssue: (directory: string) =>
+      wrap(() => invoke<Issue | null>("get_directory_issue", { directory })),
   };
 }

@@ -15,6 +15,8 @@ struct IssueStore {
     issue_links: HashMap<String, IssueLink>,
     #[serde(default)]
     comments: HashMap<String, Vec<IssueComment>>,
+    #[serde(default)]
+    dir_links: HashMap<String, DirectoryLink>,
 }
 
 fn store_path() -> PathBuf {
@@ -105,6 +107,7 @@ pub fn delete_issue(id: String) -> Result<(), String> {
     let mut store = load_store();
     store.issues.remove(&id);
     store.issue_links.retain(|_, v| v.issue_id != id);
+    store.dir_links.retain(|_, v| v.issue_id != id);
     store.comments.remove(&id);
     save_store(&store)
 }
@@ -135,7 +138,47 @@ pub fn unlink_session_from_issue(session_id: String) -> Result<(), String> {
 #[tauri::command]
 pub fn get_session_issue(session_id: String) -> Result<Option<Issue>, String> {
     let store = load_store();
+    // Check session-level link first
     if let Some(link) = store.issue_links.get(&session_id) {
+        return Ok(store.issues.get(&link.issue_id).cloned());
+    }
+    // Check directory-level link
+    if let Ok(Some(dir)) = db::get_session_directory(&session_id) {
+        if let Some(link) = store.dir_links.get(&dir) {
+            return Ok(store.issues.get(&link.issue_id).cloned());
+        }
+    }
+    Ok(None)
+}
+
+#[tauri::command]
+pub fn link_directory_to_issue(directory: String, issue_id: String) -> Result<(), String> {
+    let mut store = load_store();
+    if !store.issues.contains_key(&issue_id) {
+        return Err("Issue not found".to_string());
+    }
+    let link = DirectoryLink {
+        directory: directory.clone(),
+        issue_id,
+        linked_at: Utc::now().to_rfc3339(),
+    };
+    store.dir_links.insert(directory, link);
+    save_store(&store)
+}
+
+#[tauri::command]
+pub fn unlink_directory_from_issue(directory: String) -> Result<(), String> {
+    let mut store = load_store();
+    store.dir_links.remove(&directory);
+    // Also remove any session-level links for sessions in this directory
+    // so they don't orphan the issue
+    save_store(&store)
+}
+
+#[tauri::command]
+pub fn get_directory_issue(directory: String) -> Result<Option<Issue>, String> {
+    let store = load_store();
+    if let Some(link) = store.dir_links.get(&directory) {
         Ok(store.issues.get(&link.issue_id).cloned())
     } else {
         Ok(None)
@@ -178,9 +221,31 @@ pub fn get_all_issues() -> Result<Vec<IssueWithSessions>, String> {
             }
         }
         sessions.sort_by(|a, b| b.time_created.cmp(&a.time_created));
+
+        // Build directory-level links
+        let mut directories = Vec::new();
+        for link in store.dir_links.values() {
+            if link.issue_id != issue.id {
+                continue;
+            }
+            let count = db::get_session_count_for_directory(&link.directory).unwrap_or(0);
+            let p = std::path::Path::new(&link.directory);
+            let dir_name = p
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or(&link.directory)
+                .to_string();
+            directories.push(LinkedDirectory {
+                directory: link.directory.clone(),
+                directory_name: dir_name,
+                session_count: count,
+            });
+        }
+
         result.push(IssueWithSessions {
             issue: issue.clone(),
             sessions,
+            directories,
         });
     }
 

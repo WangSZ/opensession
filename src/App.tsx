@@ -31,6 +31,7 @@ function App() {
     toggleHidden, bootstrapSession, renameDirectoryMeta, openWorktree, removeWorktree,
     toggleSessionHidden, toggleSessionPin,
     createIssue, updateIssue, deleteIssue, linkSessionToIssue, unlinkSessionFromIssue, getAllIssues,
+    linkDirectoryToIssue, unlinkDirectoryFromIssue, getDirectoryIssue,
   } = useCommands(loadDirectories);
 
   const [directories, setDirectories] = useState<DirectoryGroup[]>([]);
@@ -63,12 +64,23 @@ function App() {
   const [issueCtxMenu, setIssueCtxMenu] = useState<{ issue: IssueWithSessions; x: number; y: number } | null>(null);
   const [selectedIssue, setSelectedIssue] = useState<IssueWithSessions | null>(null);
   const [newIssueWithDirModal, setNewIssueWithDirModal] = useState(false);
+  const [dirIssueModal, setDirIssueModal] = useState<{ directory: string; directoryName: string } | null>(null);
 
   const sessionIssueMap = useMemo(() => {
     const map: Record<string, Issue> = {};
     for (const iws of issues) {
       for (const s of iws.sessions) {
         map[s.session_id] = iws.issue;
+      }
+    }
+    return map;
+  }, [issues]);
+
+  const dirIssueMap = useMemo(() => {
+    const map: Record<string, Issue> = {};
+    for (const iws of issues) {
+      for (const d of iws.directories) {
+        map[d.directory] = iws.issue;
       }
     }
     return map;
@@ -516,6 +528,24 @@ function App() {
     }
   }
 
+  async function handleLinkDirectory(directory: string, issueId: string) {
+    try {
+      await linkDirectoryToIssue(directory, issueId);
+      await loadIssues();
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function handleUnlinkDirectory(directory: string) {
+    try {
+      await unlinkDirectoryFromIssue(directory);
+      await loadIssues();
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
   const ctxDir = ctxMenu ? directories.find(d => d.path === ctxMenu.path) : undefined;
 
   const ctxSession = sessionCtxMenu ? sessions.find(s => s.id === sessionCtxMenu.sessionId) : null;
@@ -724,6 +754,19 @@ function App() {
         icon: <Pencil size={14} />,
         onClick: () => setEditSummaryModal({ path: dirPath, summary: dir.summary ?? null }),
       },
+      {
+        type: "item" as const,
+        label: dirIssueMap[dirPath] ? "取消关联 Issue" : "关联 Issue...",
+        icon: <Bug size={14} />,
+        onClick: () => {
+          if (dirIssueMap[dirPath]) {
+            handleUnlinkDirectory(dirPath);
+          } else {
+            setDirIssueModal({ directory: dirPath, directoryName: dir.name });
+          }
+        },
+        danger: !!dirIssueMap[dirPath],
+      },
       { type: "separator" as const },
       {
         type: "item" as const,
@@ -800,6 +843,14 @@ function App() {
         onCreateIssue={() => setNewIssueWithDirModal(true)}
         onIssueContextMenu={handleIssueContextOpen}
         onNewDirectory={handleNewDirectory}
+        dirIssueMap={dirIssueMap}
+        onIssueIconClick={(issue) => {
+          const matched = issues.find(i => i.issue.id === issue.id);
+          if (matched) {
+            setSidebarView("issues");
+            setSelectedIssue(matched);
+          }
+        }}
       />
       {dbNotFound ? (
         <div className="flex-1 flex items-center justify-center">
@@ -825,6 +876,8 @@ function App() {
           onOpenFileManager={handleIssueOpenFileManager}
           onOpenInTerminal={handleIssueOpenTerminal}
           onUnlinkSession={handleUnlinkSession}
+          onOpenDirectory={(dir) => handleIssueOpenSession("", dir)}
+          onUnlinkDirectory={handleUnlinkDirectory}
         />
       ) : (
         <SessionPanel
@@ -835,6 +888,7 @@ function App() {
           onDetail={handleDetail}
           onContextMenu={handleSessionContextOpen}
           sessionIssueMap={sessionIssueMap}
+          dirIssueMap={dirIssueMap}
           highlightedSessionId={highlightedSessionId}
         />
       )}
@@ -928,6 +982,15 @@ function App() {
           onSelect={(issueId) => handleLinkSession(issueModal.sessionId, issueId)}
           onCreate={handleCreateIssueFromModal}
           onClose={() => setIssueModal(null)}
+        />
+      )}
+      {dirIssueModal !== null && (
+        <IssueModal
+          issues={issues}
+          currentIssueId={dirIssueMap[dirIssueModal.directory]?.id}
+          onSelect={(issueId) => handleLinkDirectory(dirIssueModal.directory, issueId)}
+          onCreate={handleCreateIssueFromModal}
+          onClose={() => setDirIssueModal(null)}
         />
       )}
       {editIssueModal !== null && (

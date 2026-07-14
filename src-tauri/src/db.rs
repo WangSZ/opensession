@@ -320,6 +320,23 @@ pub fn get_session_detail(session_id: &str) -> Result<SessionDetail, String> {
     })
 }
 
+pub fn get_session_directory(session_id: &str) -> Result<Option<String>, String> {
+    let conn = open_connection()?;
+    conn.query_row(
+        "SELECT directory FROM session WHERE id = ?1",
+        [session_id],
+        |row| row.get::<_, String>(0),
+    )
+    .map(Some)
+    .or_else(|e| {
+        if e == rusqlite::Error::QueryReturnedNoRows {
+            Ok(None)
+        } else {
+            Err(format!("Failed to get session directory: {}", e))
+        }
+    })
+}
+
 pub fn get_session_count_for_directory(directory: &str) -> Result<i64, String> {
     let conn = open_connection()?;
     conn.query_row(

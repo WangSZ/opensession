@@ -127,7 +127,23 @@ pub struct LinkedSession {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DirectoryLink {
+    pub directory: String,
+    pub issue_id: String,
+    pub linked_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LinkedDirectory {
+    pub directory: String,
+    pub directory_name: String,
+    pub session_count: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IssueWithSessions {
     pub issue: Issue,
     pub sessions: Vec<LinkedSession>,
+    #[serde(default)]
+    pub directories: Vec<LinkedDirectory>,
 }

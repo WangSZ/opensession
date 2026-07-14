@@ -1,7 +1,7 @@
 import { Search, FolderKanban, Loader2, Eye, EyeOff, Bug, Plus } from "lucide-react";
 import DirectoryCard from "./DirectoryCard";
 import IssueSection from "./IssueSection";
-import type { DirectoryGroup, IssueWithSessions } from "../types";
+import type { DirectoryGroup, IssueWithSessions, Issue } from "../types";
 
 type SidebarView = "dirs" | "issues";
 
@@ -30,6 +30,9 @@ interface Props {
   onCreateIssue: () => void;
   onIssueContextMenu?: (e: React.MouseEvent, issue: IssueWithSessions) => void;
   onNewDirectory: () => void;
+  // Directory issue links
+  dirIssueMap?: Record<string, Issue>;
+  onIssueIconClick?: (issue: Issue) => void;
 }
 
 export default function Sidebar({
@@ -40,7 +43,7 @@ export default function Sidebar({
   showHidden, onToggleShowHidden,
   sidebarView, onViewChange, issues, loadingIssues,
   selectedIssueId, onSelectIssue, onCreateIssue, onIssueContextMenu,
-  onNewDirectory,
+  onNewDirectory, dirIssueMap, onIssueIconClick,
 }: Props) {
   return (
     <aside className="w-72 flex-shrink-0 border-r border-surface-border bg-surface-card flex flex-col">
@@ -166,6 +169,11 @@ export default function Sidebar({
                   onSelect={() => onSelect(dir.path)}
                   onOpen={() => onOpen(dir.path)}
                   onContextMenuOpen={onContextMenuOpen}
+                  issueTitle={dirIssueMap?.[dir.path]?.title ?? null}
+                  onIssueClick={() => {
+                    const issue = dirIssueMap?.[dir.path];
+                    if (issue && onIssueIconClick) onIssueIconClick(issue);
+                  }}
                 />
               ))
             )}

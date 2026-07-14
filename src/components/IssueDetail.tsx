@@ -13,6 +13,8 @@ interface Props {
   onOpenFileManager: (directory: string) => void;
   onOpenInTerminal: (directory: string, sessionId?: string) => void;
   onUnlinkSession: (sessionId: string) => void;
+  onOpenDirectory: (directory: string) => void;
+  onUnlinkDirectory: (directory: string) => void;
 }
 
 const STATUS_LABELS: Record<string, string> = {
@@ -34,7 +36,7 @@ function deadlineInfo(deadline?: string | null): { dateStr: string; reminder: st
   return { dateStr, reminder: null, cls: "text-gray-300", show: true };
 }
 
-export default function IssueDetail({ issue, onEdit, onDelete, onOpenSession, onOpenFileManager, onOpenInTerminal, onUnlinkSession }: Props) {
+export default function IssueDetail({ issue, onEdit, onDelete, onOpenSession, onOpenFileManager, onOpenInTerminal, onUnlinkSession, onOpenDirectory, onUnlinkDirectory }: Props) {
   const [comments, setComments] = useState<IssueComment[] | null>(null);
   const [loadingComments, setLoadingComments] = useState(false);
   const [commentText, setCommentText] = useState("");
@@ -43,16 +45,21 @@ export default function IssueDetail({ issue, onEdit, onDelete, onOpenSession, on
   const [forkSuccess, setForkSuccess] = useState<Record<string, boolean>>({});
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const [sessionCtx, setSessionCtx] = useState<{ sessionId: string; x: number; y: number } | null>(null);
+  const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set(issue.directories.map(d => d.directory)));
+  const [dirSessions, setDirSessions] = useState<Record<string, Session[]>>({});
+  const [loadingDirSessions, setLoadingDirSessions] = useState<Set<string>>(new Set());
 
   const grouped = useMemo(() => {
+    const dirLinked = new Set(issue.directories.map(d => d.directory));
     const map = new Map<string, typeof issue.sessions>();
     for (const s of issue.sessions) {
+      if (dirLinked.has(s.directory)) continue;
       const existing = map.get(s.directory);
       if (existing) existing.push(s);
       else map.set(s.directory, [s]);
     }
     return Array.from(map.entries());
-  }, [issue.sessions]);
+  }, [issue.sessions, issue.directories]);
 
   const dl = deadlineInfo(issue.issue.deadline);
 
@@ -69,6 +76,22 @@ export default function IssueDetail({ issue, onEdit, onDelete, onOpenSession, on
   }
 
   useEffect(() => { loadComments(); }, []);
+
+  useEffect(() => {
+    for (const d of issue.directories) {
+      if (!dirSessions[d.directory]) {
+        setLoadingDirSessions(prev => { const n = new Set(prev); n.add(d.directory); return n; });
+        invoke<Session[]>("get_sessions", { directory: d.directory })
+          .then(sessions => {
+            setDirSessions(prev => ({ ...prev, [d.directory]: sessions }));
+          })
+          .catch(e => console.error("Load directory sessions error:", e))
+          .finally(() => {
+            setLoadingDirSessions(prev => { const n = new Set(prev); n.delete(d.directory); return n; });
+          });
+      }
+    }
+  }, [issue.issue.id]);
 
   async function handleSend() {
     const text = commentText.trim();
@@ -91,6 +114,24 @@ export default function IssueDetail({ issue, onEdit, onDelete, onOpenSession, on
       setComments(prev => prev ? prev.filter(c => c.id !== commentId) : []);
     } catch (e) {
       console.error("Delete comment error:", e);
+    }
+  }
+
+  async function toggleDir(directory: string) {
+    if (expandedDirs.has(directory)) {
+      setExpandedDirs(prev => { const n = new Set(prev); n.delete(directory); return n; });
+      return;
+    }
+    setExpandedDirs(prev => { const n = new Set(prev); n.add(directory); return n; });
+    if (!dirSessions[directory]) {
+      setLoadingDirSessions(prev => { const n = new Set(prev); n.add(directory); return n; });
+      try {
+        const sessions = await invoke<Session[]>("get_sessions", { directory });
+        setDirSessions(prev => ({ ...prev, [directory]: sessions }));
+      } catch (e) {
+        console.error("Load directory sessions error:", e);
+      }
+      setLoadingDirSessions(prev => { const n = new Set(prev); n.delete(directory); return n; });
     }
   }
 
@@ -157,11 +198,76 @@ export default function IssueDetail({ issue, onEdit, onDelete, onOpenSession, on
           <p className="text-sm text-gray-200 leading-relaxed whitespace-pre-wrap">{issue.issue.description}</p>
         )}
 
-        {grouped.length === 0 ? (
+        {grouped.length === 0 && issue.directories.length === 0 ? (
           <p className="text-sm text-gray-400">暂未关联会话</p>
         ) : (
           <div className="space-y-3">
-            <h3 className="text-xs text-gray-400 font-medium">关联的会话</h3>
+            {issue.directories.length > 0 && (
+              <div>
+                <h3 className="text-xs text-gray-400 font-medium mb-2">关联的目录</h3>
+                {issue.directories.map(d => {
+                  const isExpanded = expandedDirs.has(d.directory);
+                  const isLoading = loadingDirSessions.has(d.directory);
+                  const sessions = dirSessions[d.directory] || [];
+                  return (
+                    <div key={d.directory} className="bg-surface-card rounded-lg border border-surface-border overflow-hidden mb-1">
+                      <div className="group flex items-center gap-2 px-3 py-2 text-xs text-gray-300 hover:bg-surface-hover cursor-pointer transition-colors"
+                        onClick={() => toggleDir(d.directory)}
+                      >
+                        <FolderOpen size={12} className="text-amber-400 flex-shrink-0" />
+                        <span className="truncate flex-1">{d.directory_name}</span>
+                        <span className="text-gray-500 flex-shrink-0">{d.session_count} 个会话</span>
+                        <span className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+                          <button onClick={e => { e.stopPropagation(); onOpenFileManager(d.directory); }}
+                            className="text-gray-400 hover:text-white transition-colors p-0.5" title="在 Finder 中打开"
+                          >
+                            <FolderOpen size={11} />
+                          </button>
+                          <button onClick={e => { e.stopPropagation(); onOpenInTerminal(d.directory); }}
+                            className="text-gray-400 hover:text-white transition-colors p-0.5" title="打开终端"
+                          >
+                            <Terminal size={11} />
+                          </button>
+                          <button onClick={e => { e.stopPropagation(); onUnlinkDirectory(d.directory); }}
+                            className="text-gray-400 hover:text-red-400 transition-colors p-0.5" title="取消关联目录"
+                          >
+                            <Unlink size={11} />
+                          </button>
+                        </span>
+                      </div>
+                      {isExpanded && (
+                        <div className="border-t border-surface-border">
+                          {isLoading ? (
+                            <div className="flex items-center justify-center py-4 text-gray-500">
+                              <Loader2 size={14} className="animate-spin" />
+                            </div>
+                          ) : sessions.length === 0 ? (
+                            <div className="px-3 py-3 text-xs text-gray-500">暂无会话</div>
+                          ) : (
+                            sessions.map(s => (
+                              <div key={s.id}
+                                className="flex items-center gap-2 px-3 py-2 text-xs text-gray-300 hover:bg-surface-hover cursor-pointer transition-colors border-t border-surface-border"
+                                onClick={() => onOpenSession(s.id, d.directory)}
+                              >
+                                <Play size={10} className="text-indigo-400 flex-shrink-0" />
+                                <span className="truncate flex-1">{s.title || s.slug}</span>
+                                {s.cost > 0 && (
+                                  <span className="text-xs text-emerald-400 flex-shrink-0">${s.cost.toFixed(3)}</span>
+                                )}
+                                <span className="text-gray-500 flex-shrink-0">{s.time_ago}</span>
+                              </div>
+                            ))
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          {grouped.length > 0 && (
+            <div>
+              <h3 className="text-xs text-gray-400 font-medium mb-2">关联的会话</h3>
             {grouped.map(([dir, sessions]) => (
               <div key={dir} className="bg-surface-card rounded-lg border border-surface-border overflow-hidden">
                 <div className="flex items-center gap-1.5 px-3 py-2 bg-surface-hover text-xs text-gray-300">
@@ -226,6 +332,8 @@ export default function IssueDetail({ issue, onEdit, onDelete, onOpenSession, on
                 })}
               </div>
             ))}
+          </div>
+            )}
           </div>
         )}
 

@@ -78,7 +78,14 @@ export interface LinkedSession {
   cost: number;
 }
 
+export interface LinkedDirectory {
+  directory: string;
+  directory_name: string;
+  session_count: number;
+}
+
 export interface IssueWithSessions {
   issue: Issue;
   sessions: LinkedSession[];
+  directories: LinkedDirectory[];
 }
