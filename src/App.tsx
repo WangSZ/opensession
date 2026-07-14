@@ -809,6 +809,7 @@ function App() {
           onOpenSession={handleIssueOpenSession}
           onOpenFileManager={handleIssueOpenFileManager}
           onOpenInTerminal={handleIssueOpenTerminal}
+          onUnlinkSession={handleUnlinkSession}
         />
       ) : (
         <SessionPanel

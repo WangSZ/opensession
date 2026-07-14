@@ -1,7 +1,9 @@
 import { useState, useMemo, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { Bug, Terminal, Play, FolderOpen, Trash2, Pencil, Send, Clock, AlertTriangle, X, MessageSquare, GitFork, Check, Loader2 } from "lucide-react";
+import { Bug, Terminal, Play, FolderOpen, Trash2, Pencil, Send, Clock, AlertTriangle, X, MessageSquare, GitFork, Check, Loader2, Unlink } from "lucide-react";
 import type { IssueWithSessions, IssueComment, Session } from "../types";
+import ContextMenu from "./ContextMenu";
+import type { MenuItem } from "./ContextMenu";
 
 interface Props {
   issue: IssueWithSessions;
@@ -10,6 +12,7 @@ interface Props {
   onOpenSession: (sessionId: string, directory: string) => void;
   onOpenFileManager: (directory: string) => void;
   onOpenInTerminal: (directory: string, sessionId?: string) => void;
+  onUnlinkSession: (sessionId: string) => void;
 }
 
 const STATUS_LABELS: Record<string, string> = {
@@ -31,7 +34,7 @@ function deadlineInfo(deadline?: string | null): { dateStr: string; reminder: st
   return { dateStr, reminder: null, cls: "text-gray-300", show: true };
 }
 
-export default function IssueDetail({ issue, onEdit, onDelete, onOpenSession, onOpenFileManager, onOpenInTerminal }: Props) {
+export default function IssueDetail({ issue, onEdit, onDelete, onOpenSession, onOpenFileManager, onOpenInTerminal, onUnlinkSession }: Props) {
   const [comments, setComments] = useState<IssueComment[] | null>(null);
   const [loadingComments, setLoadingComments] = useState(false);
   const [commentText, setCommentText] = useState("");
@@ -39,6 +42,7 @@ export default function IssueDetail({ issue, onEdit, onDelete, onOpenSession, on
   const [forkingId, setForkingId] = useState<string | null>(null);
   const [forkSuccess, setForkSuccess] = useState<Record<string, boolean>>({});
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const [sessionCtx, setSessionCtx] = useState<{ sessionId: string; x: number; y: number } | null>(null);
 
   const grouped = useMemo(() => {
     const map = new Map<string, typeof issue.sessions>();
@@ -181,6 +185,11 @@ export default function IssueDetail({ issue, onEdit, onDelete, onOpenSession, on
                     <div key={s.session_id}
                       className="group flex items-center gap-2 px-3 py-2 text-xs text-gray-300 hover:bg-surface-hover cursor-pointer transition-colors border-t border-surface-border"
                       onClick={() => onOpenSession(s.session_id, s.directory)}
+                      onContextMenu={e => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setSessionCtx({ sessionId: s.session_id, x: e.clientX, y: e.clientY });
+                      }}
                     >
                       <Play size={10} className="text-indigo-400 flex-shrink-0" />
                       <span className="truncate flex-1">{s.session_title || "Untitled"}</span>
@@ -268,6 +277,22 @@ export default function IssueDetail({ issue, onEdit, onDelete, onOpenSession, on
           </div>
         </div>
       </div>
+      {sessionCtx && (
+        <ContextMenu
+          x={sessionCtx.x}
+          y={sessionCtx.y}
+          items={[
+            {
+              type: "item",
+              label: "取消关联 Issue",
+              icon: <Unlink size={14} />,
+              danger: true,
+              onClick: () => onUnlinkSession(sessionCtx.sessionId),
+            },
+          ]}
+          onClose={() => setSessionCtx(null)}
+        />
+      )}
     </div>
   );
 }
