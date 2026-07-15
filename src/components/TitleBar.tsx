@@ -19,50 +19,6 @@ function useMaximized() {
   return isMaximized;
 }
 
-function TrafficLights() {
-  const isMaximized = useMaximized();
-
-  return (
-    <div className="flex items-center gap-2 group">
-      <button
-        className="w-3 h-3 rounded-full bg-[#ff5f57] hover:bg-[#ff5f57] flex items-center justify-center"
-        onClick={() => getCurrentWindow().close()}
-        title="关闭"
-      >
-        <svg className="opacity-0 group-hover:opacity-100" width="6" height="6" viewBox="0 0 6 6" fill="none">
-          <path d="M1.2 1.2 L4.8 4.8 M4.8 1.2 L1.2 4.8" stroke="#4d0000" strokeWidth="1.3" strokeLinecap="round"/>
-        </svg>
-      </button>
-      <button
-        className="w-3 h-3 rounded-full bg-[#febc2e] hover:bg-[#febc2e] flex items-center justify-center"
-        onClick={() => getCurrentWindow().minimize()}
-        title="最小化"
-      >
-        <svg className="opacity-0 group-hover:opacity-100" width="6" height="6" viewBox="0 0 6 6" fill="none">
-          <line x1="1.2" y1="3" x2="4.8" y2="3" stroke="#4d3300" strokeWidth="1.3" strokeLinecap="round"/>
-        </svg>
-      </button>
-      <button
-        className="w-3 h-3 rounded-full bg-[#28c840] hover:bg-[#28c840] flex items-center justify-center"
-        onClick={() => getCurrentWindow().toggleMaximize()}
-        title={isMaximized ? "还原" : "最大化"}
-      >
-        {isMaximized ? (
-          <svg className="opacity-0 group-hover:opacity-100" width="6" height="6" viewBox="0 0 6 6" fill="none">
-            <path d="M1 1 L3.5 1 L1 3.5 Z" fill="#003d00"/>
-            <path d="M5 5 L2.5 5 L5 2.5 Z" fill="#003d00"/>
-          </svg>
-        ) : (
-          <svg className="opacity-0 group-hover:opacity-100" width="6" height="6" viewBox="0 0 6 6" fill="none">
-            <path d="M1 5 L1 2.5 L3.5 5 Z" fill="#003d00"/>
-            <path d="M5 1 L5 3.5 L2.5 1 Z" fill="#003d00"/>
-          </svg>
-        )}
-      </button>
-    </div>
-  );
-}
-
 function WindowControls() {
   const isMaximized = useMaximized();
 
@@ -107,9 +63,7 @@ export default function TitleBar() {
     >
       {isMac ? (
         <>
-          <div className="w-[76px] shrink-0 flex items-center pl-3">
-            <TrafficLights />
-          </div>
+          <div className="w-[76px] shrink-0" data-tauri-drag-region onDoubleClick={handleDoubleClick} />
           <div className="flex-1 h-full" data-tauri-drag-region onDoubleClick={handleDoubleClick} />
           <div className="w-[76px] shrink-0" data-tauri-drag-region onDoubleClick={handleDoubleClick} />
           <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-xs text-gray-500 font-medium tracking-wide pointer-events-none select-none">

@@ -18,13 +18,14 @@
     "tauri": "tauri"
   },
   "dependencies": {
+    "@cloudworxx/tauri-plugin-mac-rounded-corners": "^1.1.1",
+    "@tanstack/react-virtual": "^3",
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-dialog": "^2",
     "@tauri-apps/plugin-shell": "^2",
-    "react": "^19",
-    "react-dom": "^19",
     "lucide-react": "^0.400",
-    "@tanstack/react-virtual": "^3"
+    "react": "^19",
+    "react-dom": "^19"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2",

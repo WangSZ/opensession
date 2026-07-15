@@ -2,6 +2,10 @@ pub mod commands;
 pub mod config;
 pub mod db;
 pub mod models;
+pub mod plugins;
+
+use plugins::mac_rounded_corners;
+use tauri::Manager;
 
 pub fn run() {
     config::migrate_summaries_if_needed();
@@ -9,6 +13,18 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
+        .setup(|app| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = mac_rounded_corners::enable_modern_window_style(
+                    app.handle().clone(),
+                    window,
+                    Some(10.0),
+                    None,
+                    None,
+                );
+            }
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             commands::issues::create_issue,
             commands::issues::update_issue,
@@ -47,6 +63,9 @@ pub fn run() {
             commands::terminal::open_worktree,
             commands::terminal::list_git_bases,
             commands::terminal::remove_worktree,
+            mac_rounded_corners::enable_rounded_corners,
+            mac_rounded_corners::enable_modern_window_style,
+            mac_rounded_corners::reposition_traffic_lights,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

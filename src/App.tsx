@@ -19,6 +19,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { ask, open } from "@tauri-apps/plugin-dialog";
 import { Database, Terminal, FolderOpen, Pin, Tag, EyeOff, Sparkles, GitBranch, GitFork, Play, Copy, Info, Bug, Pencil, Trash2, CodeXml, Braces } from "lucide-react";
 import type { DirectoryGroup, Session, SessionDetail as SessionDetailType, Summary, Issue, IssueWithSessions } from "./types";
+import { enableModernWindowStyle } from "@cloudworxx/tauri-plugin-mac-rounded-corners";
 
 const isMac = navigator.platform.toLowerCase().includes("mac");
 type SidebarView = "dirs" | "issues";
@@ -98,6 +99,9 @@ function App() {
 
   useEffect(() => {
     loadDirectories();
+    if (isMac) {
+      enableModernWindowStyle({ cornerRadius: 10, offsetX: 0, offsetY: 0 });
+    }
     const onFocus = () => loadDirectories();
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
@@ -816,7 +820,7 @@ function App() {
   }, [ctxDir, allTags]);
 
   return (
-    <div className="flex flex-col h-screen bg-surface text-gray-100 rounded-[10px] overflow-hidden">
+    <div className="flex flex-col h-screen bg-surface text-gray-100 overflow-hidden">
       <TitleBar />
       <div className="flex flex-1 overflow-hidden">
       <Sidebar
