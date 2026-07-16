@@ -10,12 +10,13 @@ interface Props {
   onSelect: () => void;
   onOpen: () => void;
   onContextMenuOpen: (path: string, x: number, y: number) => void;
+  onTagOverflowClick: (path: string, x: number, y: number) => void;
   issueTitle?: string | null;
   onIssueClick?: () => void;
 }
 
 export default function DirectoryCard({
-  directory, isSelected, isGenerating, onSelect, onOpen, onContextMenuOpen, issueTitle, onIssueClick,
+  directory, isSelected, isGenerating, onSelect, onOpen, onContextMenuOpen, onTagOverflowClick, issueTitle, onIssueClick,
 }: Props) {
   const displayName = directory.is_worktree
     ? `${directory.repo_name ?? directory.name} (${directory.branch_name ?? directory.name})`
@@ -93,9 +94,12 @@ export default function DirectoryCard({
                 </span>
               ))}
               {directory.tags.length > MAX_VISIBLE_TAGS && (
-                <span className="text-xs text-gray-500 bg-surface-border rounded-full px-2 py-0.5">
+                <button
+                  className="text-xs text-gray-500 bg-surface-border rounded-full px-2 py-0.5 hover:bg-surface-hover transition-colors cursor-pointer"
+                  onClick={e => { e.stopPropagation(); onTagOverflowClick(directory.path, e.clientX, e.clientY); }}
+                >
                   +{directory.tags.length - MAX_VISIBLE_TAGS}
-                </span>
+                </button>
               )}
             </div>
           )}

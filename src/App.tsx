@@ -9,6 +9,7 @@ import ContextMenu from "./components/ContextMenu";
 import TitleBar from "./components/TitleBar";
 import type { MenuItem } from "./components/ContextMenu";
 import NewTagModal from "./components/NewTagModal";
+import TagPopup from "./components/TagPopup";
 import EditSummaryModal from "./components/EditSummaryModal";
 import ConfirmDialog from "./components/ConfirmDialog";
 import WorktreeModal from "./components/WorktreeModal";
@@ -49,6 +50,7 @@ function App() {
   const [ctxMenu, setCtxMenu] = useState<{ path: string; x: number; y: number } | null>(null);
   const [newTagModal, setNewTagModal] = useState<string | null>(null);
   const [confirmDeleteTag, setConfirmDeleteTag] = useState<string | null>(null);
+  const [tagOverflowPopup, setTagOverflowPopup] = useState<{ path: string; x: number; y: number } | null>(null);
   const [editSummaryModal, setEditSummaryModal] = useState<{ path: string; summary: Summary | null } | null>(null);
   const [worktreeModal, setWorktreeModal] = useState<{ path: string; defaultName: string } | null>(null);
   const [confirmRemoveWorktree, setConfirmRemoveWorktree] = useState<string | null>(null);
@@ -221,13 +223,17 @@ function App() {
   }
 
   async function handleNewDirectory() {
-    const path = await open({
-      directory: true,
-      multiple: false,
-      title: "选择目录",
-    });
-    if (!path) return;
-    await handleOpenInTerminal(path);
+    try {
+      const path = await open({
+        directory: true,
+        multiple: false,
+        title: "选择目录",
+      });
+      if (!path) return;
+      await handleOpenInTerminal(path);
+    } catch (e) {
+      setError(`打开目录选择器失败: ${String(e)}`);
+    }
   }
 
   async function handleForkSession(directory: string, sessionId: string) {
@@ -401,6 +407,10 @@ function App() {
 
   function handleContextOpen(path: string, x: number, y: number) {
     setCtxMenu({ path, x, y });
+  }
+
+  function handleTagOverflowClick(path: string, x: number, y: number) {
+    setTagOverflowPopup({ path, x, y });
   }
 
   function handleSessionContextOpen(sessionId: string, x: number, y: number) {
@@ -831,6 +841,7 @@ function App() {
         onSelect={handleSelectDir}
         onOpen={handleOpenInTerminal}
         onContextMenuOpen={handleContextOpen}
+        onTagOverflowClick={handleTagOverflowClick}
         generatingDirs={generatingDirs}
         loading={loadingDirs}
         allTags={allTags}
@@ -933,6 +944,25 @@ function App() {
           defaultName={worktreeModal.defaultName}
           onConfirm={handleConfirmWorktree}
           onClose={() => setWorktreeModal(null)}
+        />
+      )}
+      {tagOverflowPopup !== null && (
+        <TagPopup
+          tags={directories.find(d => d.path === tagOverflowPopup.path)?.tags ?? []}
+          allTags={allTags}
+          x={tagOverflowPopup.x}
+          y={tagOverflowPopup.y}
+          onToggleTag={(tag) => {
+            const dir = directories.find(d => d.path === tagOverflowPopup.path);
+            if (dir) {
+              const newTags = dir.tags.includes(tag)
+                ? dir.tags.filter(t => t !== tag)
+                : [...dir.tags, tag];
+              setDirectoryTags(tagOverflowPopup.path, newTags);
+            }
+          }}
+          onNewTag={() => setNewTagModal(tagOverflowPopup.path)}
+          onClose={() => setTagOverflowPopup(null)}
         />
       )}
       {confirmRemoveWorktree !== null && (

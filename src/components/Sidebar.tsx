@@ -13,6 +13,7 @@ interface Props {
   onSelect: (path: string) => void;
   onOpen: (path: string, sessionId?: string) => void;
   onContextMenuOpen: (path: string, x: number, y: number) => void;
+  onTagOverflowClick: (path: string, x: number, y: number) => void;
   generatingDirs: Set<string>;
   loading: boolean;
   allTags: string[];
@@ -37,7 +38,7 @@ interface Props {
 
 export default function Sidebar({
   directories, selectedDir, searchQuery, onSearchChange,
-  onSelect, onOpen, onContextMenuOpen,
+  onSelect, onOpen, onContextMenuOpen, onTagOverflowClick,
   generatingDirs, loading,
   allTags, selectedTags, onToggleTag,
   showHidden, onToggleShowHidden,
@@ -161,14 +162,15 @@ export default function Sidebar({
               )
             ) : (
               directories.map(dir => (
-                <DirectoryCard
-                  key={dir.path}
-                  directory={dir}
-                  isSelected={selectedDir === dir.path}
-                  isGenerating={generatingDirs.has(dir.path)}
-                  onSelect={() => onSelect(dir.path)}
-                  onOpen={() => onOpen(dir.path)}
-                  onContextMenuOpen={onContextMenuOpen}
+<DirectoryCard
+                    key={dir.path}
+                    directory={dir}
+                    isSelected={selectedDir === dir.path}
+                    isGenerating={generatingDirs.has(dir.path)}
+                    onSelect={() => onSelect(dir.path)}
+                    onOpen={() => onOpen(dir.path)}
+                    onContextMenuOpen={onContextMenuOpen}
+                    onTagOverflowClick={onTagOverflowClick}
                   issueTitle={dirIssueMap?.[dir.path]?.title ?? null}
                   onIssueClick={() => {
                     const issue = dirIssueMap?.[dir.path];
