@@ -1,4 +1,5 @@
-import { Play, Info, FileCode, EyeOff, Bug } from "lucide-react";
+import { useState, useRef, useEffect } from "react";
+import { Play, Info, FileCode, EyeOff, Bug, Pencil } from "lucide-react";
 import CopyButton from "./CopyButton";
 import type { Session, Issue } from "../types";
 
@@ -8,14 +9,48 @@ interface Props {
   onResume: () => void;
   onDetail: () => void;
   onContextMenu: (e: React.MouseEvent) => void;
+  onSetNote: (note: string) => void;
   issue?: Issue | null;
   highlighted?: boolean;
 }
 
-export default function SessionCard({ session, directory, onResume, onDetail, onContextMenu, issue, highlighted }: Props) {
+export default function SessionCard({ session, directory, onResume, onDetail, onContextMenu, onSetNote, issue, highlighted }: Props) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    if (editing && inputRef.current) {
+      inputRef.current.focus();
+      inputRef.current.selectionStart = inputRef.current.value.length;
+      inputRef.current.selectionEnd = inputRef.current.value.length;
+    }
+  }, [editing]);
+
+  useEffect(() => {
+    if (editing && inputRef.current) {
+      inputRef.current.style.height = "auto";
+      inputRef.current.style.height = inputRef.current.scrollHeight + "px";
+    }
+  }, [editing, draft]);
+
+  function startEdit() {
+    setDraft(session.note);
+    setEditing(true);
+  }
+
+  function save() {
+    if (draft !== session.note) onSetNote(draft);
+    setEditing(false);
+  }
+
+  function handleKeyDown(e: React.KeyboardEvent) {
+    if (e.key === "Escape") setEditing(false);
+    if ((e.metaKey || e.ctrlKey) && e.key === "Enter") save();
+  }
   return (
     <div
-      className={`mx-4 my-1.5 bg-surface-card rounded-lg border p-3.5 transition-all hover:-translate-y-0.5 hover:shadow-lg ${
+      className={`mx-4 my-1.5 bg-surface-card rounded-lg border p-3.5 transition-all hover:-translate-y-0.5 hover:shadow-lg group ${
         highlighted
           ? "border-amber-500/60 shadow-lg shadow-amber-500/10"
           : "border-surface-border hover:border-gray-600"
@@ -50,6 +85,44 @@ export default function SessionCard({ session, directory, onResume, onDetail, on
             <FileCode size={12} className="text-green-500" />
             <span className="text-green-400">{session.file_changes} files</span>
           </>
+        )}
+      </div>
+
+      <div className="flex items-start gap-2 text-xs mb-1.5 min-h-0">
+        {editing ? (
+          <div className="flex items-start gap-1 w-full">
+            <textarea
+              ref={inputRef}
+              className="flex-1 bg-surface-hover text-gray-200 rounded px-2 py-1 text-xs border border-surface-border focus:border-indigo-500 focus:outline-none resize-none leading-relaxed"
+              value={draft}
+              onChange={e => setDraft(e.target.value)}
+              onKeyDown={handleKeyDown}
+              onBlur={save}
+              placeholder="添加备注... (⌘+Enter 保存)"
+              rows={1}
+            />
+            <div className="flex gap-0.5 pt-0.5">
+              <button onMouseDown={e => { e.preventDefault(); save(); }} className="text-green-500 hover:text-green-400 p-0.5" title="Save">✓</button>
+              <button onMouseDown={e => { e.preventDefault(); setEditing(false); }} className="text-gray-500 hover:text-gray-300 p-0.5" title="Cancel">✗</button>
+            </div>
+          </div>
+        ) : session.note ? (
+          <div className="flex items-start gap-1 w-full group">
+            <span
+              className="text-gray-300 flex-1 cursor-pointer whitespace-pre-wrap leading-relaxed"
+              onClick={startEdit}
+              title="Click to edit"
+            >
+              {session.note}
+            </span>
+            <button onClick={startEdit} className="text-gray-600 hover:text-gray-300 opacity-0 group-hover:opacity-100 transition-opacity p-0.5 pt-1">
+              <Pencil size={11} />
+            </button>
+          </div>
+        ) : (
+          <button onClick={startEdit} className="text-gray-600 hover:text-gray-400 italic opacity-0 group-hover:opacity-100 transition-opacity">
+            + 备注
+          </button>
         )}
       </div>
 

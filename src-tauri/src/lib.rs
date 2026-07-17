@@ -60,6 +60,7 @@ pub fn run() {
             commands::meta::open_in_jetbrains,
             commands::session_meta::toggle_session_hidden,
             commands::session_meta::toggle_session_pin,
+            commands::session_meta::set_session_note,
             commands::terminal::open_worktree,
             commands::terminal::list_git_bases,
             commands::terminal::remove_worktree,

@@ -12,12 +12,13 @@ interface Props {
   onResume: (sessionId: string) => void;
   onDetail: (sessionId: string) => void;
   onContextMenu: (sessionId: string, x: number, y: number) => void;
+  onSetNote: (sessionId: string, note: string) => void;
   sessionIssueMap?: Record<string, Issue>;
   dirIssueMap?: Record<string, Issue>;
   highlightedSessionId?: string | null;
 }
 
-export default function SessionPanel({ directory, sessions, loading, onResume, onDetail, onContextMenu, sessionIssueMap, dirIssueMap, highlightedSessionId }: Props) {
+export default function SessionPanel({ directory, sessions, loading, onResume, onDetail, onContextMenu, onSetNote, sessionIssueMap, dirIssueMap, highlightedSessionId }: Props) {
   const [searchQuery, setSearchQuery] = useState("");
   const [showHidden, setShowHidden] = useState(false);
   const parentRef = useRef<HTMLDivElement>(null);
@@ -32,7 +33,8 @@ export default function SessionPanel({ directory, sessions, loading, onResume, o
       list = list.filter(s =>
         s.title.toLowerCase().includes(q) ||
         s.slug.toLowerCase().includes(q) ||
-        s.first_message.toLowerCase().includes(q)
+        s.first_message.toLowerCase().includes(q) ||
+        s.note.toLowerCase().includes(q)
       );
     }
     return [...list].sort((a, b) => Number(b.pinned) - Number(a.pinned));
@@ -70,7 +72,7 @@ export default function SessionPanel({ directory, sessions, loading, onResume, o
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={14} />
           <input
             className="w-full bg-surface-hover text-gray-200 rounded-lg pl-8 pr-3 py-1.5 text-xs border border-surface-border focus:border-indigo-500 focus:outline-none transition-colors"
-            placeholder="Search sessions by title or message..."
+            placeholder="Search sessions by title, message or note..."
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
           />
@@ -129,6 +131,7 @@ export default function SessionPanel({ directory, sessions, loading, onResume, o
                     e.preventDefault();
                     onContextMenu(filteredSessions[item.index].id, e.clientX, e.clientY);
                   }}
+                  onSetNote={(note) => onSetNote(filteredSessions[item.index].id, note)}
                   issue={sessionIssueMap?.[filteredSessions[item.index].id] ?? dirIssueMap?.[directory] ?? null}
                   highlighted={highlightedSessionId === filteredSessions[item.index].id}
                 />

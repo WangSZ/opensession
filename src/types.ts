@@ -34,6 +34,7 @@ export interface Session {
   first_message: string;
   hidden: boolean;
   pinned: boolean;
+  note: string;
 }
 
 export interface SessionDetail {

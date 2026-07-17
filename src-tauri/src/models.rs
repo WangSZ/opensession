@@ -46,6 +46,8 @@ pub struct Session {
     pub hidden: bool,
     #[serde(default)]
     pub pinned: bool,
+    #[serde(default)]
+    pub note: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -77,6 +79,8 @@ pub struct SessionMeta {
     pub hidden: bool,
     #[serde(default)]
     pub pinned: bool,
+    #[serde(default)]
+    pub note: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

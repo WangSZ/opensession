@@ -3,7 +3,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { FolderKanban, Loader2, X } from "lucide-react";
 
 interface Props {
-  onCreate: (title: string, description: string | null, priority: string, status: string, deadline: string | null, directory: string) => Promise<void>;
+  onCreate: (title: string, description: string | null, priority: string, status: string, deadline: string | null, directory: string | null) => Promise<void>;
   onClose: () => void;
 }
 
@@ -30,7 +30,7 @@ export default function NewIssueWithDirModal({ onCreate, onClose }: Props) {
   }
 
   async function handleCreate() {
-    if (!title.trim() || !directory) return;
+    if (!title.trim()) return;
     setCreating(true);
     try {
       await onCreate(
@@ -53,7 +53,7 @@ export default function NewIssueWithDirModal({ onCreate, onClose }: Props) {
         onClick={e => e.stopPropagation()}
       >
         <div className="flex items-center justify-between mb-3">
-          <h3 className="text-sm font-medium">新建 Issue 并打开目录</h3>
+          <h3 className="text-sm font-medium">新建 Issue</h3>
           <button onClick={onClose} className="text-gray-500 hover:text-gray-200 transition-colors">
             <X size={16} />
           </button>
@@ -121,22 +121,27 @@ export default function NewIssueWithDirModal({ onCreate, onClose }: Props) {
             className="flex items-center gap-1.5 px-3 py-2 text-xs bg-surface-hover hover:bg-surface-hover/80 text-gray-300 rounded-lg border border-surface-border transition-colors"
           >
             <FolderKanban size={14} />
-            选择目录
+            {directory ? "更改目录" : "选择目录"}
           </button>
           <span className="text-xs text-gray-500 truncate flex-1">
-            {directory || "未选择目录"}
+            {directory || "未选择目录（可选）"}
           </span>
+          {directory && (
+            <button onClick={() => setDirectory(null)} className="text-xs text-gray-500 hover:text-gray-200 transition-colors">
+              清除
+            </button>
+          )}
         </div>
 
         <div className="flex justify-end gap-2">
           <button onClick={onClose} className="px-3 py-1.5 text-xs text-gray-400 hover:text-gray-200 transition-colors">取消</button>
           <button
             onClick={handleCreate}
-            disabled={creating || !title.trim() || !directory}
+            disabled={creating || !title.trim()}
             className="flex items-center gap-1 px-3 py-1.5 text-xs bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white rounded-md transition-colors"
           >
             {creating ? <Loader2 size={12} className="animate-spin" /> : <FolderKanban size={12} />}
-            {creating ? "创建中…" : "创建并打开"}
+            {creating ? "创建中…" : directory ? "创建并打开目录" : "创建"}
           </button>
         </div>
       </div>

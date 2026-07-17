@@ -35,6 +35,7 @@ pub fn merge_into_sessions(sessions: &mut Vec<Session>) {
         if let Some(entry) = meta.get(&s.id) {
             s.hidden = entry.hidden;
             s.pinned = entry.pinned;
+            s.note = entry.note.clone();
         }
     }
 }
@@ -57,4 +58,13 @@ pub fn toggle_session_pin(session_id: String) -> Result<bool, String> {
     let new_state = entry.pinned;
     save_session_meta(&meta)?;
     Ok(new_state)
+}
+
+#[tauri::command]
+pub fn set_session_note(session_id: String, note: String) -> Result<(), String> {
+    let mut meta = load_session_meta();
+    let entry = meta.entry(session_id).or_default();
+    entry.note = note;
+    save_session_meta(&meta)?;
+    Ok(())
 }

@@ -31,7 +31,7 @@ function App() {
     setCachedSummary, deleteCachedSummary,
     openInTerminal, forkSession, setDirectoryTags, deleteTagGlobal, togglePin, openInFileManager, openInVSCode, openInJetBrains,
     toggleHidden, bootstrapSession, renameDirectoryMeta, openWorktree, removeWorktree,
-    toggleSessionHidden, toggleSessionPin,
+    toggleSessionHidden, toggleSessionPin, setSessionNote,
     createIssue, updateIssue, deleteIssue, linkSessionToIssue, unlinkSessionFromIssue, getAllIssues,
     linkDirectoryToIssue, unlinkDirectoryFromIssue, getDirectoryIssue,
   } = useCommands(loadDirectories);
@@ -438,6 +438,14 @@ function App() {
     }
   }
 
+  async function handleSetSessionNote(sessionId: string, note: string) {
+    await setSessionNote(sessionId, note);
+    if (selectedDir) {
+      const sess = await getSessions(selectedDir);
+      setSessions(sess);
+    }
+  }
+
   // Issue handlers
   function handleSelectIssue(issue: IssueWithSessions) {
     setSelectedIssue(issue);
@@ -480,23 +488,25 @@ function App() {
     }
   }
 
-  async function handleCreateIssueWithDir(title: string, description: string | null, priority: string, status: string, deadline: string | null, directory: string) {
+  async function handleCreateIssueWithDir(title: string, description: string | null, priority: string, status: string, deadline: string | null, directory: string | null) {
     try {
       const issue = await createIssue(title, description, null, priority, status, deadline);
-      await openInTerminal(directory);
-      const startTime = Date.now();
-      while (Date.now() - startTime < 30000) {
-        await new Promise(r => setTimeout(r, 1000));
-        try {
-          const sessions = await invoke<Session[]>("get_sessions", { directory });
-          const newSession = sessions.find(s =>
-            new Date(s.time_created).getTime() > startTime
-          );
-          if (newSession) {
-            await linkSessionToIssue(newSession.id, issue.id, directory);
-            break;
-          }
-        } catch { }
+      if (directory) {
+        await openInTerminal(directory);
+        const startTime = Date.now();
+        while (Date.now() - startTime < 30000) {
+          await new Promise(r => setTimeout(r, 1000));
+          try {
+            const sessions = await invoke<Session[]>("get_sessions", { directory });
+            const newSession = sessions.find(s =>
+              new Date(s.time_created).getTime() > startTime
+            );
+            if (newSession) {
+              await linkSessionToIssue(newSession.id, issue.id, directory);
+              break;
+            }
+          } catch { }
+        }
       }
       await Promise.all([loadIssues(), loadDirectories()]);
     } catch (e) {
@@ -902,6 +912,7 @@ function App() {
           onResume={(sid) => selectedDir && handleOpenInTerminal(selectedDir, sid)}
           onDetail={handleDetail}
           onContextMenu={handleSessionContextOpen}
+          onSetNote={handleSetSessionNote}
           sessionIssueMap={sessionIssueMap}
           dirIssueMap={dirIssueMap}
           highlightedSessionId={highlightedSessionId}

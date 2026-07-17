@@ -110,6 +110,7 @@ fn map_session_row(row: &rusqlite::Row) -> rusqlite::Result<Session> {
         first_message,
         hidden: false,
         pinned: false,
+        note: String::new(),
     })
 }
 
@@ -264,6 +265,7 @@ pub fn get_session_by_id(session_id: &str) -> Result<(Session, String), String> 
                     first_message,
                     hidden: false,
                     pinned: false,
+                    note: String::new(),
                 },
                 model_provider,
             ))
