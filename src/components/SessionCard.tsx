@@ -73,82 +73,86 @@ export default function SessionCard({ session, directory, onResume, onDetail, on
         </span>
       </div>
 
-      <div className="flex items-center gap-2 text-xs text-gray-400 mb-2">
-        <span className="bg-surface-hover px-1.5 py-0.5 rounded">{session.agent}</span>
-        <span>·</span>
-        <span className="truncate max-w-[200px]">{session.model_name}</span>
-        <span>·</span>
-        <span>${session.cost.toFixed(3)}</span>
-        {session.file_changes > 0 && (
-          <>
-            <span>·</span>
-            <FileCode size={12} className="text-green-500" />
-            <span className="text-green-400">{session.file_changes} files</span>
-          </>
-        )}
-      </div>
-
-      <div className="flex items-start gap-2 text-xs mb-1.5 min-h-0">
-        {editing ? (
-          <div className="flex items-start gap-1 w-full">
-            <textarea
-              ref={inputRef}
-              className="flex-1 bg-surface-hover text-gray-200 rounded px-2 py-1 text-xs border border-surface-border focus:border-indigo-500 focus:outline-none resize-none leading-relaxed"
-              value={draft}
-              onChange={e => setDraft(e.target.value)}
-              onKeyDown={handleKeyDown}
-              onBlur={save}
-              placeholder="添加备注... (⌘+Enter 保存)"
-              rows={1}
-            />
-            <div className="flex gap-0.5 pt-0.5">
-              <button onMouseDown={e => { e.preventDefault(); save(); }} className="text-green-500 hover:text-green-400 p-0.5" title="Save">✓</button>
-              <button onMouseDown={e => { e.preventDefault(); setEditing(false); }} className="text-gray-500 hover:text-gray-300 p-0.5" title="Cancel">✗</button>
-            </div>
-          </div>
-        ) : session.note ? (
-          <div className="flex items-start gap-1 w-full group">
-            <span
-              className="text-gray-300 flex-1 cursor-pointer whitespace-pre-wrap leading-relaxed"
-              onClick={startEdit}
-              title="Click to edit"
-            >
-              {session.note}
-            </span>
-            <button onClick={startEdit} className="text-gray-600 hover:text-gray-300 opacity-0 group-hover:opacity-100 transition-opacity p-0.5 pt-1">
-              <Pencil size={11} />
-            </button>
-          </div>
-        ) : (
-          <button onClick={startEdit} className="text-gray-600 hover:text-gray-400 italic opacity-0 group-hover:opacity-100 transition-opacity">
-            + 备注
-          </button>
-        )}
-      </div>
-
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3 text-xs text-gray-500">
+      <div className="flex items-center justify-between gap-2 text-xs text-gray-400 mb-2">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="bg-surface-hover px-1.5 py-0.5 rounded whitespace-nowrap">{session.agent}</span>
+          <span>·</span>
+          <span className="truncate">{session.model_name}</span>
+          <span>·</span>
+          <span className="whitespace-nowrap">${session.cost.toFixed(3)}</span>
+          {session.file_changes > 0 && (
+            <>
+              <span>·</span>
+              <FileCode size={12} className="text-green-500 shrink-0" />
+              <span className="text-green-400 whitespace-nowrap">{session.file_changes} files</span>
+            </>
+          )}
+        </div>
+        <div className="flex items-center gap-3 text-xs text-gray-500 shrink-0">
           <span>↗ {formatNum(session.tokens_input)}</span>
           <span>↙ {formatNum(session.tokens_output)}</span>
         </div>
-        <div className="flex items-center gap-1.5">
-          <button
-            onClick={onResume}
-            className="flex items-center gap-1 px-2.5 py-1 text-xs bg-indigo-600 hover:bg-indigo-500 text-white rounded-md transition-colors"
-          >
-            <Play size={12} />
-            Resume
-          </button>
-          <CopyButton text={`cd "${directory}" && opencode --session ${session.id}`} />
-          <button
-            onClick={onDetail}
-            className="flex items-center gap-1 px-2.5 py-1 text-xs bg-surface-hover hover:bg-surface-border text-gray-300 rounded-md transition-colors"
-          >
-            <Info size={12} />
-            Detail
-          </button>
-        </div>
       </div>
+
+      <div className="flex items-start gap-2 text-xs min-h-0">
+        <div className="flex-1 min-w-0">
+          {editing ? (
+            <div className="flex items-start gap-1">
+              <textarea
+                ref={inputRef}
+                className="flex-1 bg-surface-hover text-gray-200 rounded px-2 py-1 text-xs border border-surface-border focus:border-indigo-500 focus:outline-none resize-none leading-relaxed"
+                value={draft}
+                onChange={e => setDraft(e.target.value)}
+                onKeyDown={handleKeyDown}
+                onBlur={save}
+                placeholder="添加备注... (⌘+Enter 保存)"
+                rows={1}
+              />
+              <div className="flex gap-0.5 pt-0.5">
+                <button onMouseDown={e => { e.preventDefault(); save(); }} className="text-green-500 hover:text-green-400 p-0.5" title="Save">✓</button>
+                <button onMouseDown={e => { e.preventDefault(); setEditing(false); }} className="text-gray-500 hover:text-gray-300 p-0.5" title="Cancel">✗</button>
+              </div>
+            </div>
+          ) : session.note ? (
+            <div className="flex items-start gap-1 group">
+              <span
+                className="text-gray-300 cursor-pointer whitespace-pre-wrap leading-relaxed"
+                onClick={startEdit}
+                title="Click to edit"
+              >
+                {session.note}
+              </span>
+              <button onClick={startEdit} className="text-gray-600 hover:text-gray-300 opacity-0 group-hover:opacity-100 transition-opacity p-0.5 pt-1">
+                <Pencil size={11} />
+              </button>
+            </div>
+          ) : (
+            <button onClick={startEdit} className="text-gray-600 hover:text-gray-400 italic opacity-0 group-hover:opacity-100 transition-opacity">
+              + 备注
+            </button>
+          )}
+        </div>
+        {!editing && (
+          <div className="flex items-center gap-1.5 shrink-0">
+            <button
+              onClick={onResume}
+              className="flex items-center gap-1 px-2.5 py-1 text-xs bg-indigo-600 hover:bg-indigo-500 text-white rounded-md transition-colors"
+            >
+              <Play size={12} />
+              Resume
+            </button>
+            <CopyButton text={`cd "${directory}" && opencode --session ${session.id}`} />
+            <button
+              onClick={onDetail}
+              className="flex items-center gap-1 px-2.5 py-1 text-xs bg-surface-hover hover:bg-surface-border text-gray-300 rounded-md transition-colors"
+            >
+              <Info size={12} />
+              Detail
+            </button>
+          </div>
+        )}
+      </div>
+
     </div>
   );
 }
