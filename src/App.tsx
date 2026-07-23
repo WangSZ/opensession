@@ -18,7 +18,7 @@ import NewIssueWithDirModal from "./components/NewIssueWithDirModal";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { ask, open } from "@tauri-apps/plugin-dialog";
-import { Database, Terminal, FolderOpen, Pin, Tag, EyeOff, Sparkles, GitBranch, GitFork, Play, Copy, Info, Bug, Pencil, Trash2, CodeXml, Braces } from "lucide-react";
+import { Database, Terminal, SquareTerminal, FolderOpen, Pin, Tag, EyeOff, Sparkles, GitBranch, GitFork, Play, Copy, Info, Bug, Pencil, Trash2, CodeXml, Braces } from "lucide-react";
 import type { DirectoryGroup, Session, SessionDetail as SessionDetailType, Summary, Issue, IssueWithSessions } from "./types";
 import { enableModernWindowStyle } from "@cloudworxx/tauri-plugin-mac-rounded-corners";
 
@@ -29,7 +29,7 @@ function App() {
   const {
     listDirectories, getSessions, getSessionDetail, generateSummary,
     setCachedSummary, deleteCachedSummary,
-    openInTerminal, forkSession, setDirectoryTags, deleteTagGlobal, togglePin, openInFileManager, openInVSCode, openInJetBrains,
+    openInTerminal, openPlainTerminal, forkSession, setDirectoryTags, deleteTagGlobal, togglePin, openInFileManager, openInVSCode, openInJetBrains,
     toggleHidden, bootstrapSession, renameDirectoryMeta, openWorktree, removeWorktree,
     toggleSessionHidden, toggleSessionPin, setSessionNote,
     createIssue, updateIssue, deleteIssue, linkSessionToIssue, unlinkSessionFromIssue, getAllIssues,
@@ -761,9 +761,15 @@ function App() {
       },
       {
         type: "item" as const,
-        label: "打开终端",
+        label: "打开 OpenCode",
         icon: <Terminal size={14} />,
         onClick: () => handleOpenInTerminal(dirPath),
+      },
+      {
+        type: "item" as const,
+        label: "打开终端",
+        icon: <SquareTerminal size={14} />,
+        onClick: () => openPlainTerminal(dirPath).catch(e => setError(String(e))),
       },
       {
         type: "item" as const,

@@ -48,6 +48,7 @@ pub fn run() {
             commands::summary::set_cached_summary,
             commands::summary::delete_cached_summary,
             commands::terminal::open_in_terminal,
+            commands::terminal::open_plain_terminal,
             commands::terminal::fork_session,
             commands::terminal::bootstrap_session,
             commands::meta::set_directory_tags,

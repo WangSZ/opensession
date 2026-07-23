@@ -224,7 +224,7 @@ export default function IssueDetail({ issue, onEdit, onDelete, onOpenSession, on
                             <FolderOpen size={11} />
                           </button>
                           <button onClick={e => { e.stopPropagation(); onOpenInTerminal(d.directory); }}
-                            className="text-gray-400 hover:text-white transition-colors p-0.5" title="打开终端"
+                            className="text-gray-400 hover:text-white transition-colors p-0.5" title="打开 OpenCode"
                           >
                             <Terminal size={11} />
                           </button>
@@ -279,7 +279,7 @@ export default function IssueDetail({ issue, onEdit, onDelete, onOpenSession, on
                     <FolderOpen size={11} />
                   </button>
                   <button onClick={() => onOpenInTerminal(dir)}
-                    className="text-gray-500 hover:text-gray-200 transition-colors p-0.5" title="打开终端"
+                    className="text-gray-500 hover:text-gray-200 transition-colors p-0.5" title="打开 OpenCode"
                   >
                     <Terminal size={11} />
                   </button>
@@ -310,7 +310,7 @@ export default function IssueDetail({ issue, onEdit, onDelete, onOpenSession, on
                           <FolderOpen size={11} />
                         </button>
                         <button onClick={e => { e.stopPropagation(); onOpenInTerminal(s.directory, s.session_id); }}
-                          className="text-gray-400 hover:text-white transition-colors p-0.5" title="打开终端"
+                          className="text-gray-400 hover:text-white transition-colors p-0.5" title="打开 OpenCode"
                         >
                           <Terminal size={11} />
                         </button>

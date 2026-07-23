@@ -19,6 +19,8 @@ export function useCommands(onAfterCommand?: () => void) {
       wrap(() => invoke<void>("delete_cached_summary", { directory })),
     openInTerminal: (directory: string, sessionId?: string) =>
       invoke<void>("open_in_terminal", { directory, sessionId: sessionId ?? null }),
+    openPlainTerminal: (directory: string) =>
+      invoke<void>("open_plain_terminal", { directory }),
     forkSession: (directory: string, sessionId: string) =>
       invoke<void>("fork_session", { directory, sessionId }),
     bootstrapSession: (directory: string) =>

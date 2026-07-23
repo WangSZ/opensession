@@ -1,3 +1,40 @@
+#[tauri::command]
+pub fn open_plain_terminal(directory: String) -> Result<(), String> {
+    check_directory_exists(&directory)?;
+
+    #[cfg(target_os = "macos")]
+    {
+        let script = format!(
+            "tell app \"Terminal\"\nactivate\ndo script \"cd \\\"{}\\\"\"\nend tell",
+            directory
+        );
+        std::process::Command::new("osascript")
+            .args(["-e", &script])
+            .spawn()
+            .map_err(|e| format!("Failed to open Terminal: {}", e))?;
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        let cmd = format!("cd /d \"{}\"", directory);
+        std::process::Command::new("cmd")
+            .args(["/c", "start", "wt", "cmd", "/k", &cmd])
+            .spawn()
+            .map_err(|e| format!("Failed to open terminal: {}", e))?;
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        let cmd = format!("cd \"{}\" && exec bash", directory);
+        std::process::Command::new("x-terminal-emulator")
+            .args(["-e", "bash", "-c", &cmd])
+            .spawn()
+            .map_err(|e| format!("Failed to open terminal: {}", e))?;
+    }
+
+    Ok(())
+}
+
 fn check_directory_exists(directory: &str) -> Result<(), String> {
     if !std::path::Path::new(directory).exists() {
         return Err("DIRECTORY_NOT_FOUND".into());
