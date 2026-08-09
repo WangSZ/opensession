@@ -1,6 +1,7 @@
 import { X, MessageSquare, DollarSign, Cpu, User, Hash, FileCode } from "lucide-react";
 import CopyButton from "./CopyButton";
 import type { SessionDetail as SessionDetailType } from "../types";
+import { resumeCommand } from "../utils/sessionCommand";
 
 interface Props {
   detail: SessionDetailType;
@@ -32,28 +33,30 @@ export default function SessionDetail({ detail, directory, onClose }: Props) {
             <h4 className="text-xs text-gray-500 uppercase tracking-wider mb-2">Command</h4>
             <div className="bg-surface rounded-lg p-3 flex items-center gap-2">
               <code className="text-xs font-mono text-gray-300 flex-1 min-w-0 truncate leading-relaxed">
-                cd &quot;{directory}&quot; &amp;&amp; opencode --session {s.id}
+                {resumeCommand(directory, s.source, s.id)}
               </code>
-              <CopyButton variant="full" text={`cd "${directory}" && opencode --session ${s.id}`} />
+              <CopyButton variant="full" text={resumeCommand(directory, s.source, s.id)} />
             </div>
           </div>
 
           <div className="grid grid-cols-2 gap-3">
+            <Stat icon={Cpu} label="Source" value={s.source === "codex" ? "Codex" : "OpenCode"} />
             <Stat icon={Cpu} label="Agent" value={s.agent} />
-            <Stat icon={Hash} label="Model" value={s.model_name} />
-            <Stat icon={DollarSign} label="Cost" value={`$${s.cost.toFixed(4)}`} />
-            <Stat icon={MessageSquare} label="Messages" value={String(detail.messages_count)} />
-            <Stat icon={User} label="Provider" value={detail.model_provider} />
-            <Stat icon={FileCode} label="File Changes" value={String(s.file_changes)} />
+            {s.model_name && <Stat icon={Hash} label="Model" value={s.model_name} />}
+            {s.cost != null && <Stat icon={DollarSign} label="Cost" value={`$${s.cost.toFixed(4)}`} />}
+            {detail.messages_count != null && <Stat icon={MessageSquare} label="Messages" value={String(detail.messages_count)} />}
+            {detail.model_provider && <Stat icon={User} label="Provider" value={detail.model_provider} />}
+            {s.file_changes != null && <Stat icon={FileCode} label="File Changes" value={String(s.file_changes)} />}
           </div>
 
-          <div>
+          {(s.tokens_input != null || s.tokens_output != null || s.tokens_total != null) && <div>
             <h4 className="text-xs text-gray-500 uppercase tracking-wider mb-2">Tokens</h4>
             <div className="bg-surface rounded-lg p-3 space-y-1.5 text-sm font-mono">
-              <div className="flex justify-between"><span className="text-gray-400">Input</span><span>{formatNum(s.tokens_input)}</span></div>
-              <div className="flex justify-between"><span className="text-gray-400">Output</span><span>{formatNum(s.tokens_output)}</span></div>
+              {s.tokens_input != null && <div className="flex justify-between"><span className="text-gray-400">Input</span><span>{formatNum(s.tokens_input)}</span></div>}
+              {s.tokens_output != null && <div className="flex justify-between"><span className="text-gray-400">Output</span><span>{formatNum(s.tokens_output)}</span></div>}
+              {s.tokens_total != null && <div className="flex justify-between"><span className="text-gray-400">Total</span><span>{formatNum(s.tokens_total)}</span></div>}
             </div>
-          </div>
+          </div>}
 
           <div>
             <h4 className="text-xs text-gray-500 uppercase tracking-wider mb-2">Timeline</h4>

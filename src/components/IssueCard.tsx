@@ -29,7 +29,7 @@ function deadlineInfo(deadline?: string | null): { dateStr: string; reminder: st
 
 export default function IssueCard({ issue, selected, onSelect, onContextMenu }: Props) {
   const dl = deadlineInfo(issue.issue.deadline);
-  const totalCost = issue.sessions.reduce((sum, s) => sum + s.cost, 0);
+  const totalCost = issue.sessions.reduce((sum, s) => sum + (s.cost ?? 0), 0);
 
   const priorityDot = issue.issue.priority === "high" ? "bg-red-500" : issue.issue.priority === "low" ? "bg-green-500" : "bg-amber-500";
 

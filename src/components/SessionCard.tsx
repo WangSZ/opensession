@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { Play, Info, FileCode, EyeOff, Bug, Pencil } from "lucide-react";
 import CopyButton from "./CopyButton";
 import type { Session, Issue } from "../types";
+import { resumeCommand } from "../utils/sessionCommand";
 
 interface Props {
   session: Session;
@@ -58,9 +59,18 @@ export default function SessionCard({ session, directory, onResume, onDetail, on
       onContextMenu={onContextMenu}
     >
       <div className="flex items-start justify-between mb-1.5">
-        <h3 className="font-medium text-sm truncate flex-1 min-w-0 mr-2">
-          {session.title || session.slug}
-        </h3>
+        <div className="flex items-center gap-2 flex-1 min-w-0 mr-2">
+          <span className={`text-[10px] leading-5 px-1.5 rounded font-medium flex-shrink-0 ${
+            session.source === "codex"
+              ? "bg-emerald-500/15 text-emerald-300"
+              : "bg-indigo-500/15 text-indigo-300"
+          }`}>
+            {session.source === "codex" ? "Codex" : "OpenCode"}
+          </span>
+          <h3 className="font-medium text-sm truncate min-w-0">
+            {session.title || session.slug || session.first_message}
+          </h3>
+        </div>
         <span className="text-xs text-gray-500 flex-shrink-0 whitespace-nowrap flex items-center gap-1">
           {session.hidden && <EyeOff size={11} className="text-gray-600" />}
           {issue && (
@@ -77,10 +87,14 @@ export default function SessionCard({ session, directory, onResume, onDetail, on
         <div className="flex items-center gap-2 min-w-0">
           <span className="bg-surface-hover px-1.5 py-0.5 rounded whitespace-nowrap">{session.agent}</span>
           <span>·</span>
-          <span className="truncate">{session.model_name}</span>
-          <span>·</span>
-          <span className="whitespace-nowrap">${session.cost.toFixed(3)}</span>
-          {session.file_changes > 0 && (
+          {session.model_name && <span className="truncate">{session.model_name}</span>}
+          {session.cost != null && (
+            <>
+              <span>·</span>
+              <span className="whitespace-nowrap">${session.cost.toFixed(3)}</span>
+            </>
+          )}
+          {session.file_changes != null && session.file_changes > 0 && (
             <>
               <span>·</span>
               <FileCode size={12} className="text-green-500 shrink-0" />
@@ -89,8 +103,11 @@ export default function SessionCard({ session, directory, onResume, onDetail, on
           )}
         </div>
         <div className="flex items-center gap-3 text-xs text-gray-500 shrink-0">
-          <span>↗ {formatNum(session.tokens_input)}</span>
-          <span>↙ {formatNum(session.tokens_output)}</span>
+          {session.tokens_input != null && <span>↗ {formatNum(session.tokens_input)}</span>}
+          {session.tokens_output != null && <span>↙ {formatNum(session.tokens_output)}</span>}
+          {session.tokens_input == null && session.tokens_output == null && session.tokens_total != null && (
+            <span>{formatNum(session.tokens_total)} tokens</span>
+          )}
         </div>
       </div>
 
@@ -141,7 +158,7 @@ export default function SessionCard({ session, directory, onResume, onDetail, on
               <Play size={12} />
               Resume
             </button>
-            <CopyButton text={`cd "${directory}" && opencode --session ${session.id}`} />
+            <CopyButton text={resumeCommand(directory, session.source, session.id)} />
             <button
               onClick={onDetail}
               className="flex items-center gap-1 px-2.5 py-1 text-xs bg-surface-hover hover:bg-surface-border text-gray-300 rounded-md transition-colors"

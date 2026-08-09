@@ -1,8 +1,11 @@
+pub mod codex_db;
 pub mod commands;
 pub mod config;
 pub mod db;
 pub mod models;
 pub mod plugins;
+pub mod session_repository;
+pub mod session_sources;
 
 use plugins::mac_rounded_corners;
 use tauri::Manager;
@@ -40,6 +43,7 @@ pub fn run() {
             commands::issues::unlink_directory_from_issue,
             commands::issues::get_directory_issue,
             commands::sessions::list_directories,
+            commands::sessions::get_source_statuses,
             commands::sessions::get_sessions,
             commands::sessions::get_session_detail,
             commands::sessions::search_directories,

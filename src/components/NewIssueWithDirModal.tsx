@@ -1,19 +1,22 @@
 import { useState, useEffect } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { FolderKanban, Loader2, X } from "lucide-react";
+import type { SessionSource } from "../types";
 
 interface Props {
-  onCreate: (title: string, description: string | null, priority: string, status: string, deadline: string | null, directory: string | null) => Promise<void>;
+  initialSource: SessionSource;
+  onCreate: (title: string, description: string | null, priority: string, status: string, deadline: string | null, directory: string | null, source: SessionSource) => Promise<void>;
   onClose: () => void;
 }
 
-export default function NewIssueWithDirModal({ onCreate, onClose }: Props) {
+export default function NewIssueWithDirModal({ initialSource, onCreate, onClose }: Props) {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [priority, setPriority] = useState("medium");
   const [status, setStatus] = useState("open");
   const [deadline, setDeadline] = useState("");
   const [directory, setDirectory] = useState<string | null>(null);
+  const [source, setSource] = useState<SessionSource>(initialSource);
   const [creating, setCreating] = useState(false);
 
   useEffect(() => {
@@ -40,6 +43,7 @@ export default function NewIssueWithDirModal({ onCreate, onClose }: Props) {
         status,
         deadline ? new Date(deadline + "T23:59:59").toISOString() : null,
         directory,
+        source,
       );
     } finally {
       onClose();
@@ -132,6 +136,28 @@ export default function NewIssueWithDirModal({ onCreate, onClose }: Props) {
             </button>
           )}
         </div>
+
+        {directory && (
+          <div className="mb-4">
+            <label className="text-xs text-gray-500 block mb-1">启动方式</label>
+            <div className="grid grid-cols-2 bg-surface-hover border border-surface-border rounded-md p-0.5">
+              {(["opencode", "codex"] as SessionSource[]).map(value => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => setSource(value)}
+                  className={`px-3 py-1.5 text-xs rounded transition-colors ${
+                    source === value
+                      ? "bg-surface-border text-gray-100"
+                      : "text-gray-500 hover:text-gray-300"
+                  }`}
+                >
+                  {value === "codex" ? "Codex" : "OpenCode"}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         <div className="flex justify-end gap-2">
           <button onClick={onClose} className="px-3 py-1.5 text-xs text-gray-400 hover:text-gray-200 transition-colors">取消</button>

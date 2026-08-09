@@ -13,21 +13,35 @@ import TagPopup from "./components/TagPopup";
 import EditSummaryModal from "./components/EditSummaryModal";
 import ConfirmDialog from "./components/ConfirmDialog";
 import WorktreeModal from "./components/WorktreeModal";
+import SourcePickerModal from "./components/SourcePickerModal";
 import IssueModal from "./components/IssueModal";
 import NewIssueWithDirModal from "./components/NewIssueWithDirModal";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { ask, open } from "@tauri-apps/plugin-dialog";
 import { Database, Terminal, SquareTerminal, FolderOpen, Pin, Tag, EyeOff, Sparkles, GitBranch, GitFork, Play, Copy, Info, Bug, Pencil, Trash2, CodeXml, Braces } from "lucide-react";
-import type { DirectoryGroup, Session, SessionDetail as SessionDetailType, Summary, Issue, IssueWithSessions } from "./types";
+import type { DirectoryGroup, Session, SessionSource, SessionDetail as SessionDetailType, SourceStatuses, Summary, Issue, IssueWithSessions } from "./types";
 import { enableModernWindowStyle } from "@cloudworxx/tauri-plugin-mac-rounded-corners";
+import { resumeCommand, sessionKey } from "./utils/sessionCommand";
 
 const isMac = navigator.platform.toLowerCase().includes("mac");
 type SidebarView = "dirs" | "issues";
+type PendingSourceAction =
+  | { kind: "open"; directory: string }
+  | { kind: "relocate"; oldDirectory: string; directory: string };
+
+function sourceStatusWarning(statuses: SourceStatuses): string | null {
+  const warnings: string[] = [];
+  if (statuses.opencode === "unsupported_schema") warnings.push("OpenCode data schema is unsupported");
+  if (statuses.codex === "unsupported_schema") warnings.push("Codex data schema is unsupported");
+  if (statuses.opencode === "read_error") warnings.push("OpenCode data could not be read");
+  if (statuses.codex === "read_error") warnings.push("Codex data could not be read");
+  return warnings.length > 0 ? warnings.join("; ") : null;
+}
 
 function App() {
   const {
-    listDirectories, getSessions, getSessionDetail, generateSummary,
+    listDirectories, getSourceStatuses, getSessions, getSessionDetail, generateSummary,
     setCachedSummary, deleteCachedSummary,
     openInTerminal, openPlainTerminal, forkSession, setDirectoryTags, deleteTagGlobal, togglePin, openInFileManager, openInVSCode, openInJetBrains,
     toggleHidden, bootstrapSession, renameDirectoryMeta, openWorktree, removeWorktree,
@@ -37,6 +51,9 @@ function App() {
   } = useCommands(loadDirectories);
 
   const [directories, setDirectories] = useState<DirectoryGroup[]>([]);
+  const [lastSessionSource, setLastSessionSource] = useState<SessionSource>(() =>
+    localStorage.getItem("opensession:last-source") === "codex" ? "codex" : "opencode"
+  );
   const [selectedDir, setSelectedDir] = useState<string | null>(null);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
@@ -44,6 +61,7 @@ function App() {
   const [loadingDirs, setLoadingDirs] = useState(true);
   const [loadingSessions, setLoadingSessions] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [sourceWarning, setSourceWarning] = useState<string | null>(null);
   const [dbNotFound, setDbNotFound] = useState(false);
   const [generatingDirs, setGeneratingDirs] = useState<Set<string>>(new Set());
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
@@ -53,17 +71,18 @@ function App() {
   const [tagOverflowPopup, setTagOverflowPopup] = useState<{ path: string; x: number; y: number } | null>(null);
   const [editSummaryModal, setEditSummaryModal] = useState<{ path: string; summary: Summary | null } | null>(null);
   const [worktreeModal, setWorktreeModal] = useState<{ path: string; defaultName: string } | null>(null);
+  const [sourcePicker, setSourcePicker] = useState<PendingSourceAction | null>(null);
   const [confirmRemoveWorktree, setConfirmRemoveWorktree] = useState<string | null>(null);
-  const [sessionCtxMenu, setSessionCtxMenu] = useState<{ sessionId: string; x: number; y: number } | null>(null);
+  const [sessionCtxMenu, setSessionCtxMenu] = useState<{ source: SessionSource; sessionId: string; x: number; y: number } | null>(null);
   const [showHidden, setShowHidden] = useState(false);
   // Issue state
   const [sidebarView, setSidebarView] = useState<SidebarView>("dirs");
   const [issues, setIssues] = useState<IssueWithSessions[]>([]);
   const [loadingIssues, setLoadingIssues] = useState(false);
-  const [issueModal, setIssueModal] = useState<{ sessionId: string; directory: string } | null>(null);
+  const [issueModal, setIssueModal] = useState<{ source: SessionSource; sessionId: string; directory: string } | null>(null);
   const [editIssueModal, setEditIssueModal] = useState<IssueWithSessions | null>(null);
   const [confirmDeleteIssue, setConfirmDeleteIssue] = useState<string | null>(null);
-  const [highlightedSessionId, setHighlightedSessionId] = useState<string | null>(null);
+  const [highlightedSessionKey, setHighlightedSessionKey] = useState<string | null>(null);
   const [issueCtxMenu, setIssueCtxMenu] = useState<{ issue: IssueWithSessions; x: number; y: number } | null>(null);
   const [selectedIssue, setSelectedIssue] = useState<IssueWithSessions | null>(null);
   const [newIssueWithDirModal, setNewIssueWithDirModal] = useState(false);
@@ -73,7 +92,7 @@ function App() {
     const map: Record<string, Issue> = {};
     for (const iws of issues) {
       for (const s of iws.sessions) {
-        map[s.session_id] = iws.issue;
+        map[sessionKey(s.session_source, s.session_id)] = iws.issue;
       }
     }
     return map;
@@ -123,16 +142,19 @@ function App() {
   async function loadDirectories() {
     setDbNotFound(false);
     try {
-      const [dirs, loadedIssues] = await Promise.all([
+      const [dirs, loadedIssues, statuses] = await Promise.all([
         listDirectories(),
         getAllIssues().catch(() => [] as IssueWithSessions[]),
+        getSourceStatuses(),
       ]);
       setDirectories(dirs);
+      setDbNotFound(dirs.length === 0);
       setIssues(loadedIssues);
+      setSourceWarning(sourceStatusWarning(statuses));
       setError(null);
     } catch (e) {
       const msg = String(e);
-      if (msg === "OPENCODE_DB_NOT_FOUND") {
+      if (msg.includes("NO_SESSION_DATA")) {
         setDbNotFound(true);
       } else {
         setError(msg);
@@ -156,7 +178,7 @@ function App() {
 
   async function handleSelectDir(path: string) {
     setSelectedDir(path);
-    setHighlightedSessionId(null);
+    setHighlightedSessionKey(null);
     setLoadingSessions(true);
     try {
       const sess = await getSessions(path);
@@ -169,9 +191,9 @@ function App() {
     }
   }
 
-  async function handleDetail(sessionId: string) {
+  async function handleDetail(session: Session) {
     try {
-      const detail = await getSessionDetail(sessionId);
+      const detail = await getSessionDetail(session.source, session.id);
       setDetailSession(detail);
     } catch (e) {
       setError(String(e));
@@ -209,9 +231,10 @@ function App() {
     }
   }
 
-  async function handleOpenInTerminal(directory: string, sessionId?: string) {
+  async function handleOpenInTerminal(directory: string, source: SessionSource, sessionId?: string) {
     try {
-      await openInTerminal(directory, sessionId);
+      rememberSessionSource(source);
+      await openInTerminal(directory, source, sessionId);
     } catch (e) {
       const msg = String(e);
       if (msg.includes("DIRECTORY_NOT_FOUND")) {
@@ -230,15 +253,15 @@ function App() {
         title: "选择目录",
       });
       if (!path) return;
-      await handleOpenInTerminal(path);
+      setSourcePicker({ kind: "open", directory: path });
     } catch (e) {
       setError(`打开目录选择器失败: ${String(e)}`);
     }
   }
 
-  async function handleForkSession(directory: string, sessionId: string) {
+  async function handleForkSession(directory: string, source: SessionSource, sessionId: string) {
     try {
-      await forkSession(directory, sessionId);
+      await forkSession(directory, source, sessionId);
     } catch (e) {
       const msg = String(e);
       if (msg.includes("DIRECTORY_NOT_FOUND")) {
@@ -279,12 +302,13 @@ function App() {
     }
   }
 
-  async function handleConfirmWorktree(name: string, base: string) {
+  async function handleConfirmWorktree(name: string, base: string, source: SessionSource) {
     if (!worktreeModal) return;
     const { path } = worktreeModal;
     setWorktreeModal(null);
     try {
-      await openWorktree(path, name, base);
+      rememberSessionSource(source);
+      await openWorktree(path, name, base, source);
     } catch (e) {
       const msg = String(e);
       if (msg === "NOT_A_GIT_REPO") {
@@ -329,12 +353,31 @@ function App() {
 
     if (!newPath) return;
 
+    setSourcePicker({ kind: "relocate", oldDirectory: path, directory: newPath });
+  }
+
+  function rememberSessionSource(source: SessionSource) {
+    setLastSessionSource(source);
+    localStorage.setItem("opensession:last-source", source);
+  }
+
+  async function handleSourcePickerConfirm(source: SessionSource) {
+    if (!sourcePicker) return;
+    const action = sourcePicker;
+    setSourcePicker(null);
+    rememberSessionSource(source);
+
+    if (action.kind === "open") {
+      await handleOpenInTerminal(action.directory, source);
+      return;
+    }
+
     try {
-      await renameDirectoryMeta(path, newPath);
-      await bootstrapSession(newPath);
+      await renameDirectoryMeta(action.oldDirectory, action.directory);
+      await bootstrapSession(action.directory, source);
       await loadDirectories();
-      setSelectedDir(newPath);
-      await handleSelectDir(newPath);
+      setSelectedDir(action.directory);
+      await handleSelectDir(action.directory);
     } catch (e) {
       setError(`迁移失败: ${String(e)}`);
     }
@@ -413,8 +456,8 @@ function App() {
     setTagOverflowPopup({ path, x, y });
   }
 
-  function handleSessionContextOpen(sessionId: string, x: number, y: number) {
-    setSessionCtxMenu({ sessionId, x, y });
+  function handleSessionContextOpen(session: Session, x: number, y: number) {
+    setSessionCtxMenu({ source: session.source, sessionId: session.id, x, y });
   }
 
   function handleIssueContextOpen(e: React.MouseEvent, issue: IssueWithSessions) {
@@ -422,24 +465,24 @@ function App() {
     setIssueCtxMenu({ issue, x: e.clientX, y: e.clientY });
   }
 
-  async function handleToggleSessionHidden(sessionId: string) {
-    await toggleSessionHidden(sessionId);
+  async function handleToggleSessionHidden(session: Session) {
+    await toggleSessionHidden(session.source, session.id);
     if (selectedDir) {
       const sess = await getSessions(selectedDir);
       setSessions(sess);
     }
   }
 
-  async function handleToggleSessionPin(sessionId: string) {
-    await toggleSessionPin(sessionId);
+  async function handleToggleSessionPin(session: Session) {
+    await toggleSessionPin(session.source, session.id);
     if (selectedDir) {
       const sess = await getSessions(selectedDir);
       setSessions(sess);
     }
   }
 
-  async function handleSetSessionNote(sessionId: string, note: string) {
-    await setSessionNote(sessionId, note);
+  async function handleSetSessionNote(session: Session, note: string) {
+    await setSessionNote(session.source, session.id, note);
     if (selectedDir) {
       const sess = await getSessions(selectedDir);
       setSessions(sess);
@@ -451,18 +494,18 @@ function App() {
     setSelectedIssue(issue);
   }
 
-  function handleIssueOpenSession(sessionId: string, directory: string) {
+  function handleIssueOpenSession(source: SessionSource, sessionId: string, directory: string) {
     setSidebarView("dirs");
     setSelectedIssue(null);
-    setHighlightedSessionId(sessionId);
+    setHighlightedSessionKey(sessionKey(source, sessionId));
     setSelectedDir(directory);
     getSessions(directory).then(sess => {
       setSessions(sess);
     }).catch(e => setError(String(e)));
   }
 
-  function handleIssueOpenTerminal(directory: string, sessionId?: string) {
-    openInTerminal(directory, sessionId).catch(e => setError(String(e)));
+  function handleIssueOpenTerminal(directory: string, source: SessionSource, sessionId?: string) {
+    handleOpenInTerminal(directory, source, sessionId);
   }
 
   function handleIssueOpenFileManager(directory: string) {
@@ -488,25 +531,13 @@ function App() {
     }
   }
 
-  async function handleCreateIssueWithDir(title: string, description: string | null, priority: string, status: string, deadline: string | null, directory: string | null) {
+  async function handleCreateIssueWithDir(title: string, description: string | null, priority: string, status: string, deadline: string | null, directory: string | null, source: SessionSource) {
     try {
       const issue = await createIssue(title, description, null, priority, status, deadline);
       if (directory) {
-        await openInTerminal(directory);
-        const startTime = Date.now();
-        while (Date.now() - startTime < 30000) {
-          await new Promise(r => setTimeout(r, 1000));
-          try {
-            const sessions = await invoke<Session[]>("get_sessions", { directory });
-            const newSession = sessions.find(s =>
-              new Date(s.time_created).getTime() > startTime
-            );
-            if (newSession) {
-              await linkSessionToIssue(newSession.id, issue.id, directory);
-              break;
-            }
-          } catch { }
-        }
+        rememberSessionSource(source);
+        await linkDirectoryToIssue(directory, issue.id);
+        await openInTerminal(directory, source);
       }
       await Promise.all([loadIssues(), loadDirectories()]);
     } catch (e) {
@@ -533,19 +564,19 @@ function App() {
     }
   }
 
-  async function handleLinkSession(sessionId: string, issueId: string) {
+  async function handleLinkSession(source: SessionSource, sessionId: string, issueId: string) {
     if (!selectedDir) return;
     try {
-      await linkSessionToIssue(sessionId, issueId, selectedDir);
+      await linkSessionToIssue(source, sessionId, issueId, selectedDir);
       await loadIssues();
     } catch (e) {
       setError(String(e));
     }
   }
 
-  async function handleUnlinkSession(sessionId: string) {
+  async function handleUnlinkSession(source: SessionSource, sessionId: string) {
     try {
-      await unlinkSessionFromIssue(sessionId);
+      await unlinkSessionFromIssue(source, sessionId);
       await loadIssues();
     } catch (e) {
       setError(String(e));
@@ -572,8 +603,10 @@ function App() {
 
   const ctxDir = ctxMenu ? directories.find(d => d.path === ctxMenu.path) : undefined;
 
-  const ctxSession = sessionCtxMenu ? sessions.find(s => s.id === sessionCtxMenu.sessionId) : null;
-  const ctxSessionIssue = ctxSession ? sessionIssueMap[ctxSession.id] : null;
+  const ctxSession = sessionCtxMenu ? sessions.find(s =>
+    s.id === sessionCtxMenu.sessionId && s.source === sessionCtxMenu.source
+  ) : null;
+  const ctxSessionIssue = ctxSession ? sessionIssueMap[sessionKey(ctxSession.source, ctxSession.id)] : null;
 
   const sessionCtxItems: MenuItem[] = useMemo(() => {
     if (!ctxSession || !selectedDir) return [];
@@ -582,27 +615,27 @@ function App() {
         type: "item" as const,
         label: "Resume",
         icon: <Play size={14} />,
-        onClick: () => handleOpenInTerminal(selectedDir, ctxSession.id),
+        onClick: () => handleOpenInTerminal(selectedDir, ctxSession.source, ctxSession.id),
       },
       {
         type: "item" as const,
         label: "Fork 新会话",
         icon: <GitFork size={14} />,
-        onClick: () => handleForkSession(selectedDir, ctxSession.id),
+        onClick: () => handleForkSession(selectedDir, ctxSession.source, ctxSession.id),
       },
       {
         type: "item" as const,
         label: "复制命令",
         icon: <Copy size={14} />,
         onClick: () => {
-          navigator.clipboard.writeText(`cd "${selectedDir}" && opencode --session ${ctxSession.id}`);
+          navigator.clipboard.writeText(resumeCommand(selectedDir, ctxSession.source, ctxSession.id));
         },
       },
       {
         type: "item" as const,
         label: "查看详情",
         icon: <Info size={14} />,
-        onClick: () => handleDetail(ctxSession.id),
+        onClick: () => handleDetail(ctxSession),
       },
       { type: "separator" as const },
       {
@@ -611,9 +644,9 @@ function App() {
         icon: <Bug size={14} />,
         onClick: () => {
           if (ctxSessionIssue) {
-            handleUnlinkSession(ctxSession.id);
+            handleUnlinkSession(ctxSession.source, ctxSession.id);
           } else {
-            setIssueModal({ sessionId: ctxSession.id, directory: selectedDir });
+            setIssueModal({ source: ctxSession.source, sessionId: ctxSession.id, directory: selectedDir });
           }
         },
         danger: !!ctxSessionIssue,
@@ -622,13 +655,13 @@ function App() {
         type: "item" as const,
         label: ctxSession.pinned ? "取消置顶" : "置顶",
         icon: <Pin size={14} />,
-        onClick: () => handleToggleSessionPin(ctxSession.id),
+        onClick: () => handleToggleSessionPin(ctxSession),
       },
       {
         type: "item" as const,
         label: ctxSession.hidden ? "取消隐藏" : "隐藏",
         icon: <EyeOff size={14} />,
-        onClick: () => handleToggleSessionHidden(ctxSession.id),
+        onClick: () => handleToggleSessionHidden(ctxSession),
       },
     ];
   }, [ctxSession, selectedDir, ctxSessionIssue]);
@@ -763,7 +796,13 @@ function App() {
         type: "item" as const,
         label: "打开 OpenCode",
         icon: <Terminal size={14} />,
-        onClick: () => handleOpenInTerminal(dirPath),
+        onClick: () => handleOpenInTerminal(dirPath, "opencode"),
+      },
+      {
+        type: "item" as const,
+        label: "打开 Codex",
+        icon: <Terminal size={14} />,
+        onClick: () => handleOpenInTerminal(dirPath, "codex"),
       },
       {
         type: "item" as const,
@@ -855,7 +894,7 @@ function App() {
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
         onSelect={handleSelectDir}
-        onOpen={handleOpenInTerminal}
+        onOpen={(directory) => handleOpenInTerminal(directory, lastSessionSource)}
         onContextMenuOpen={handleContextOpen}
         onTagOverflowClick={handleTagOverflowClick}
         generatingDirs={generatingDirs}
@@ -887,14 +926,13 @@ function App() {
         <div className="flex-1 flex items-center justify-center">
           <div className="text-center max-w-md px-8">
             <Database className="w-16 h-16 mx-auto mb-4 text-gray-600" />
-            <h2 className="text-xl font-semibold text-gray-300 mb-2">No opencode data found</h2>
+            <h2 className="text-xl font-semibold text-gray-300 mb-2">No session data found</h2>
             <p className="text-gray-500 leading-relaxed mb-6">
-              This app displays sessions from <code className="text-gray-400 bg-surface-card px-1.5 py-0.5 rounded text-sm">opencode</code>.
-              Make sure you have <strong className="text-gray-400">opencode CLI</strong> installed and have started at least one session.
+              Install OpenCode or Codex and start at least one interactive session in a project directory.
             </p>
             <p className="text-gray-600 text-sm flex items-center justify-center gap-2">
               <Terminal className="w-4 h-4" />
-              Run <code className="text-gray-400 bg-surface-card px-1.5 py-0.5 rounded">opencode</code> in a project to get started
+              Run <code className="text-gray-400 bg-surface-card px-1.5 py-0.5 rounded">opencode</code> or <code className="text-gray-400 bg-surface-card px-1.5 py-0.5 rounded">codex</code> to get started
             </p>
           </div>
         </div>
@@ -907,7 +945,11 @@ function App() {
           onOpenFileManager={handleIssueOpenFileManager}
           onOpenInTerminal={handleIssueOpenTerminal}
           onUnlinkSession={handleUnlinkSession}
-          onOpenDirectory={(dir) => handleIssueOpenSession("", dir)}
+          onOpenDirectory={(dir) => {
+            setSidebarView("dirs");
+            setSelectedIssue(null);
+            handleSelectDir(dir);
+          }}
           onUnlinkDirectory={handleUnlinkDirectory}
         />
       ) : (
@@ -915,13 +957,14 @@ function App() {
           directory={selectedDir}
           sessions={sessions}
           loading={loadingSessions}
-          onResume={(sid) => selectedDir && handleOpenInTerminal(selectedDir, sid)}
+          onStart={(source) => selectedDir && handleOpenInTerminal(selectedDir, source)}
+          onResume={(session) => selectedDir && handleOpenInTerminal(selectedDir, session.source, session.id)}
           onDetail={handleDetail}
           onContextMenu={handleSessionContextOpen}
           onSetNote={handleSetSessionNote}
           sessionIssueMap={sessionIssueMap}
           dirIssueMap={dirIssueMap}
-          highlightedSessionId={highlightedSessionId}
+          highlightedSessionKey={highlightedSessionKey}
         />
       )}
       {detailSession && (
@@ -959,8 +1002,19 @@ function App() {
         <WorktreeModal
           directory={worktreeModal.path}
           defaultName={worktreeModal.defaultName}
+          initialSource={lastSessionSource}
           onConfirm={handleConfirmWorktree}
           onClose={() => setWorktreeModal(null)}
+        />
+      )}
+      {sourcePicker !== null && (
+        <SourcePickerModal
+          title={sourcePicker.kind === "open" ? "选择启动方式" : "迁移后启动"}
+          directory={sourcePicker.directory}
+          initialSource={lastSessionSource}
+          confirmLabel={sourcePicker.kind === "open" ? "打开" : "迁移并打开"}
+          onConfirm={handleSourcePickerConfirm}
+          onClose={() => setSourcePicker(null)}
         />
       )}
       {tagOverflowPopup !== null && (
@@ -1029,8 +1083,8 @@ function App() {
       {issueModal !== null && (
         <IssueModal
           issues={issues}
-          currentIssueId={sessionIssueMap[issueModal.sessionId]?.id}
-          onSelect={(issueId) => handleLinkSession(issueModal.sessionId, issueId)}
+          currentIssueId={sessionIssueMap[sessionKey(issueModal.source, issueModal.sessionId)]?.id}
+          onSelect={(issueId) => handleLinkSession(issueModal.source, issueModal.sessionId, issueId)}
           onCreate={handleCreateIssueFromModal}
           onClose={() => setIssueModal(null)}
         />
@@ -1053,6 +1107,7 @@ function App() {
       )}
       {newIssueWithDirModal && (
         <NewIssueWithDirModal
+          initialSource={lastSessionSource}
           onCreate={handleCreateIssueWithDir}
           onClose={() => setNewIssueWithDirModal(false)}
         />
@@ -1072,6 +1127,12 @@ function App() {
         <div className="fixed bottom-4 right-4 bg-red-600 text-white px-4 py-2 rounded-lg shadow-lg text-sm">
           {error}
           <button className="ml-2 underline" onClick={() => setError(null)}>Close</button>
+        </div>
+      )}
+      {sourceWarning && !error && (
+        <div className="fixed bottom-4 right-4 bg-amber-600 text-white px-4 py-2 rounded-lg shadow-lg text-sm">
+          {sourceWarning}
+          <button className="ml-2 underline" onClick={() => setSourceWarning(null)}>Close</button>
         </div>
       )}
     </div>

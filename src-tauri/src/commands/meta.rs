@@ -11,22 +11,37 @@ fn load_meta() -> HashMap<String, DirectoryMeta> {
     if !path.exists() {
         return HashMap::new();
     }
-    std::fs::read_to_string(&path)
+    let meta = std::fs::read_to_string(&path)
         .ok()
         .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_default()
+        .unwrap_or_default();
+    normalize_meta_keys(meta)
+}
+
+fn normalize_meta_keys(meta: HashMap<String, DirectoryMeta>) -> HashMap<String, DirectoryMeta> {
+    let mut normalized = HashMap::<String, DirectoryMeta>::new();
+    for (path, entry) in meta {
+        let key = crate::session_repository::normalize_directory_path(&path);
+        let target = normalized.entry(key).or_default();
+        for tag in entry.tags {
+            if !target.tags.contains(&tag) {
+                target.tags.push(tag);
+            }
+        }
+        target.pinned |= entry.pinned;
+        target.hidden |= entry.hidden;
+    }
+    normalized
 }
 
 fn save_meta(meta: &HashMap<String, DirectoryMeta>) -> Result<(), String> {
     let path = meta_path();
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|e| format!("Failed to create meta dir: {}", e))?;
+        std::fs::create_dir_all(parent).map_err(|e| format!("Failed to create meta dir: {}", e))?;
     }
     let json = serde_json::to_string_pretty(meta)
         .map_err(|e| format!("Failed to serialize meta: {}", e))?;
-    std::fs::write(&path, json)
-        .map_err(|e| format!("Failed to write meta: {}", e))
+    std::fs::write(&path, json).map_err(|e| format!("Failed to write meta: {}", e))
 }
 
 pub fn mark_hidden(paths: &[String]) {
@@ -35,7 +50,8 @@ pub fn mark_hidden(paths: &[String]) {
     }
     let mut meta = load_meta();
     for p in paths {
-        let entry = meta.entry(p.clone()).or_default();
+        let path = crate::session_repository::normalize_directory_path(p);
+        let entry = meta.entry(path).or_default();
         entry.hidden = true;
     }
     let _ = save_meta(&meta);
@@ -54,6 +70,7 @@ pub fn merge_into(groups: &mut Vec<DirectoryGroup>) {
 #[tauri::command]
 pub fn set_directory_tags(path: String, tags: Vec<String>) -> Result<(), String> {
     let mut meta = load_meta();
+    let path = crate::session_repository::normalize_directory_path(&path);
     let entry = meta.entry(path).or_default();
     entry.tags = tags;
     save_meta(&meta)
@@ -71,6 +88,7 @@ pub fn delete_tag_global(tag: String) -> Result<(), String> {
 #[tauri::command]
 pub fn toggle_directory_pin(path: String) -> Result<bool, String> {
     let mut meta = load_meta();
+    let path = crate::session_repository::normalize_directory_path(&path);
     let entry = meta.entry(path).or_default();
     entry.pinned = !entry.pinned;
     let new_state = entry.pinned;
@@ -81,6 +99,7 @@ pub fn toggle_directory_pin(path: String) -> Result<bool, String> {
 #[tauri::command]
 pub fn toggle_directory_hidden(path: String) -> Result<bool, String> {
     let mut meta = load_meta();
+    let path = crate::session_repository::normalize_directory_path(&path);
     let entry = meta.entry(path).or_default();
     entry.hidden = !entry.hidden;
     let new_state = entry.hidden;
@@ -91,6 +110,8 @@ pub fn toggle_directory_hidden(path: String) -> Result<bool, String> {
 #[tauri::command]
 pub fn rename_directory_meta(old: String, new: String) -> Result<(), String> {
     let mut meta = load_meta();
+    let old = crate::session_repository::normalize_directory_path(&old);
+    let new = crate::session_repository::normalize_directory_path(&new);
     let entry = meta.remove(&old).unwrap_or_default();
     meta.insert(
         new,
@@ -100,6 +121,50 @@ pub fn rename_directory_meta(old: String, new: String) -> Result<(), String> {
         },
     );
     save_meta(&meta)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn metadata_for_equivalent_paths_is_merged() {
+        let root = std::env::temp_dir().join(format!("opensession-meta-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+
+        let mut meta = HashMap::new();
+        meta.insert(
+            root.to_string_lossy().to_string(),
+            DirectoryMeta {
+                tags: vec!["one".into()],
+                pinned: true,
+                hidden: false,
+            },
+        );
+        meta.insert(
+            root.join(".").to_string_lossy().to_string(),
+            DirectoryMeta {
+                tags: vec!["two".into()],
+                pinned: false,
+                hidden: true,
+            },
+        );
+
+        let normalized = normalize_meta_keys(meta);
+        let key = std::fs::canonicalize(&root)
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+        let entry = normalized.get(&key).unwrap();
+
+        assert_eq!(normalized.len(), 1);
+        assert_eq!(entry.tags.len(), 2);
+        assert!(entry.tags.contains(&"one".to_string()));
+        assert!(entry.tags.contains(&"two".to_string()));
+        assert!(entry.pinned);
+        assert!(entry.hidden);
+        std::fs::remove_dir_all(root).unwrap();
+    }
 }
 
 #[tauri::command]

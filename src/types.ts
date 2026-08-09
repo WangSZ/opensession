@@ -1,3 +1,17 @@
+export type SessionSource = "opencode" | "codex";
+
+export interface SourceCounts {
+  opencode: number;
+  codex: number;
+}
+
+export type SourceStatus = "available" | "not_installed" | "no_sessions" | "unsupported_schema" | "read_error";
+
+export interface SourceStatuses {
+  opencode: SourceStatus;
+  codex: SourceStatus;
+}
+
 export interface DirectoryGroup {
   path: string;
   name: string;
@@ -15,22 +29,26 @@ export interface DirectoryGroup {
   repo_name?: string | null;
   branch_name?: string | null;
   total_cost: number;
+  source_counts: SourceCounts;
 }
 
 export interface Session {
+  source: SessionSource;
   id: string;
+  directory: string;
   title: string;
   slug: string;
   agent: string;
-  model_name: string;
-  cost: number;
-  tokens_input: number;
-  tokens_output: number;
+  model_name: string | null;
+  cost: number | null;
+  tokens_input: number | null;
+  tokens_output: number | null;
+  tokens_total: number | null;
   time_created: string;
   time_updated: string;
   time_ago: string;
   parent_id: string | null;
-  file_changes: number;
+  file_changes: number | null;
   first_message: string;
   hidden: boolean;
   pinned: boolean;
@@ -40,8 +58,8 @@ export interface Session {
 export interface SessionDetail {
   session: Session;
   first_message: string;
-  messages_count: number;
-  model_provider: string;
+  messages_count: number | null;
+  model_provider: string | null;
 }
 
 export interface Summary {
@@ -70,13 +88,14 @@ export interface IssueComment {
 }
 
 export interface LinkedSession {
+  session_source: SessionSource;
   session_id: string;
   session_title: string;
   directory: string;
   directory_name: string;
   time_created: string;
   time_ago: string;
-  cost: number;
+  cost: number | null;
 }
 
 export interface LinkedDirectory {

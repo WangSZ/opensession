@@ -1,5 +1,29 @@
 use serde::{Deserialize, Serialize};
 
+use crate::session_sources::SessionSource;
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SourceCounts {
+    pub opencode: i64,
+    pub codex: i64,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SourceStatus {
+    Available,
+    NotInstalled,
+    NoSessions,
+    UnsupportedSchema,
+    ReadError,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SourceStatuses {
+    pub opencode: SourceStatus,
+    pub codex: SourceStatus,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DirectoryGroup {
     pub path: String,
@@ -24,23 +48,28 @@ pub struct DirectoryGroup {
     pub branch_name: Option<String>,
     #[serde(default)]
     pub total_cost: f64,
+    #[serde(default)]
+    pub source_counts: SourceCounts,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Session {
+    pub source: SessionSource,
     pub id: String,
+    pub directory: String,
     pub title: String,
     pub slug: String,
     pub agent: String,
-    pub model_name: String,
-    pub cost: f64,
-    pub tokens_input: i64,
-    pub tokens_output: i64,
+    pub model_name: Option<String>,
+    pub cost: Option<f64>,
+    pub tokens_input: Option<i64>,
+    pub tokens_output: Option<i64>,
+    pub tokens_total: Option<i64>,
     pub time_created: String,
     pub time_updated: String,
     pub time_ago: String,
     pub parent_id: Option<String>,
-    pub file_changes: i64,
+    pub file_changes: Option<i64>,
     pub first_message: String,
     #[serde(default)]
     pub hidden: bool,
@@ -54,8 +83,8 @@ pub struct Session {
 pub struct SessionDetail {
     pub session: Session,
     pub first_message: String,
-    pub messages_count: i64,
-    pub model_provider: String,
+    pub messages_count: Option<i64>,
+    pub model_provider: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -99,8 +128,12 @@ pub struct Issue {
     pub deadline: Option<String>,
 }
 
-fn default_priority() -> String { "medium".to_string() }
-fn default_status() -> String { "open".to_string() }
+fn default_priority() -> String {
+    "medium".to_string()
+}
+fn default_status() -> String {
+    "open".to_string()
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IssueComment {
@@ -112,6 +145,8 @@ pub struct IssueComment {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IssueLink {
+    #[serde(default)]
+    pub session_source: SessionSource,
     pub session_id: String,
     pub issue_id: String,
     pub directory: String,
@@ -120,6 +155,8 @@ pub struct IssueLink {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LinkedSession {
+    #[serde(default)]
+    pub session_source: SessionSource,
     pub session_id: String,
     pub session_title: String,
     pub directory: String,
@@ -127,7 +164,7 @@ pub struct LinkedSession {
     pub time_created: String,
     pub time_ago: String,
     #[serde(default)]
-    pub cost: f64,
+    pub cost: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

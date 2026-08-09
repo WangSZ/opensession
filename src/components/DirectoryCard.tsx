@@ -59,7 +59,7 @@ export default function DirectoryCard({
             {directory.session_count}
           </span>
           {directory.total_cost > 0 && (
-            <span className="text-xs text-emerald-400 bg-emerald-500/10 rounded-full px-2 py-0.5">
+            <span className="text-xs text-emerald-400 bg-emerald-500/10 rounded-full px-2 py-0.5" title="Known OpenCode cost">
               ${directory.total_cost.toFixed(2)}
             </span>
           )}

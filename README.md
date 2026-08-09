@@ -1,19 +1,19 @@
 # OpenSession
 
-Visual session manager for [opencode](https://opencode.ai) — browse, search, and resume AI coding sessions with a native desktop UI.
+Visual session manager for [OpenCode](https://opencode.ai) and [Codex](https://developers.openai.com/codex/) — browse, search, filter, resume, and fork AI coding sessions with a native desktop UI.
 
 ![OpenSession screenshot](screenshot.png)
 
 ## Features
 
-- **Directory browser** — browse opencode session directories with summaries and tags
-- **Session explorer** — virtual-scrolled list of past sessions per directory
-- **One-click resume** — open any session in Terminal via `opencode --session <id>`
-- **Command copy** — copy `cd /path && opencode --session <id>` with one click
+- **Unified directory browser** — merge OpenCode and Codex sessions under one project directory
+- **Session explorer** — virtual-scrolled list with All/OpenCode/Codex source filters
+- **One-click resume and fork** — launch the owning CLI with the correct session command
+- **Command copy** — copy source-aware OpenCode or Codex resume commands
 - **Session detail** — full detail drawer showing model, timestamps, and command
 - **Right-click actions** — open in Finder/Terminal, pin, hide, tag, rename
-- **Smart summaries** — AI-powered directory summaries (generated via `opencode`)
-- **Bootstrap** — quick-start a new opencode session in any directory
+- **Smart summaries** — generated via OpenCode, with an ephemeral read-only Codex fallback
+- **Quick start** — open OpenCode or Codex in any directory
 - **Search & filter** — search directories by name, filter by tags
 - **Dark theme** — native-looking dark UI
 
@@ -21,7 +21,7 @@ Visual session manager for [opencode](https://opencode.ai) — browse, search, a
 
 - [Node.js](https://nodejs.org/) (v18+)
 - [Rust](https://www.rust-lang.org/) (edition 2021)
-- [opencode CLI](https://opencode.ai) on `PATH` (required for summarization and Terminal launch)
+- [OpenCode CLI](https://opencode.ai), [Codex CLI](https://developers.openai.com/codex/cli/), or both on `PATH`
 
 ## Getting Started
 
@@ -65,7 +65,10 @@ src-tauri/              Rust backend
 ├── src/
 │   ├── main.rs         Entry point (calls my_sessions_lib::run())
 │   ├── lib.rs          Plugin registration, command handlers
-│   ├── db.rs           Read-only SQLite queries
+│   ├── db.rs           Read-only OpenCode SQLite queries
+│   ├── codex_db.rs     Read-only Codex SQLite discovery and queries
+│   ├── session_repository.rs  Cross-source aggregation
+│   ├── session_sources.rs     Source identity and CLI command construction
 │   ├── config.rs       DB path resolution, XDG dirs, migration
 │   ├── models.rs       Data structures
 │   └── commands/       Tauri commands (sessions, summary, terminal, meta)

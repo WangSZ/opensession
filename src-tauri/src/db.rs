@@ -3,12 +3,13 @@ use rusqlite::{params, Connection, OpenFlags};
 use std::collections::HashMap;
 
 use crate::models::*;
+use crate::session_sources::SessionSource;
 
 pub type SessionSummary = (String, String, i64, i64, f64);
 
 pub fn open_connection() -> Result<Connection, String> {
-    let path = crate::config::opencode_db_path()
-        .ok_or_else(|| "OPENCODE_DB_NOT_FOUND".to_string())?;
+    let path =
+        crate::config::opencode_db_path().ok_or_else(|| "OPENCODE_DB_NOT_FOUND".to_string())?;
     Connection::open_with_flags(&path, OpenFlags::SQLITE_OPEN_READ_ONLY)
         .map_err(|e| format!("Failed to open database: {}", e))
 }
@@ -64,10 +65,11 @@ fn read_cached_summaries() -> HashMap<String, Summary> {
     std::fs::read_to_string(&cache_path)
         .ok()
         .and_then(|s| serde_json::from_str(&s).ok())
+        .map(crate::session_repository::normalize_summary_keys)
         .unwrap_or_default()
 }
 
-fn map_session_row(row: &rusqlite::Row) -> rusqlite::Result<Session> {
+fn map_session_row(row: &rusqlite::Row, directory: &str) -> rusqlite::Result<Session> {
     let id: String = row.get(0)?;
     let slug: String = row.get(1)?;
     let title: String = row.get(2)?;
@@ -94,19 +96,22 @@ fn map_session_row(row: &rusqlite::Row) -> rusqlite::Result<Session> {
         .collect();
 
     Ok(Session {
+        source: SessionSource::OpenCode,
         id,
+        directory: directory.to_string(),
         title,
         slug,
         agent,
-        model_name,
-        cost,
-        tokens_input,
-        tokens_output,
+        model_name: Some(model_name),
+        cost: Some(cost),
+        tokens_input: Some(tokens_input),
+        tokens_output: Some(tokens_output),
+        tokens_total: Some(tokens_input + tokens_output),
         time_created: epoch_to_iso(time_created),
         time_updated: epoch_to_iso(time_updated),
         time_ago: time_ago(time_updated),
         parent_id,
-        file_changes,
+        file_changes: Some(file_changes),
         first_message,
         hidden: false,
         pinned: false,
@@ -147,7 +152,9 @@ pub fn list_directory_groups() -> Result<Vec<DirectoryGroup>, String> {
                 .to_string();
             let has_agents_md = p.join("AGENTS.md").exists();
             let is_missing = !p.exists();
-            let summary = summaries.get(&path).cloned();
+            let summary = summaries
+                .get(&crate::session_repository::normalize_directory_path(&path))
+                .cloned();
             let last_active = epoch_to_iso(max_t);
 
             DirectoryGroup {
@@ -167,6 +174,10 @@ pub fn list_directory_groups() -> Result<Vec<DirectoryGroup>, String> {
                 repo_name: None,
                 branch_name: None,
                 total_cost,
+                source_counts: SourceCounts {
+                    opencode: cnt,
+                    codex: 0,
+                },
             }
         })
         .collect();
@@ -194,7 +205,7 @@ pub fn get_sessions(directory: &str) -> Result<Vec<Session>, String> {
         .map_err(|e| format!("Failed to prepare query: {}", e))?;
 
     let sessions = stmt
-        .query_map([directory], |row| map_session_row(row))
+        .query_map([directory], |row| map_session_row(row, directory))
         .map_err(|e| format!("Failed to query sessions: {}", e))?
         .filter_map(|r| r.ok())
         .collect();
@@ -208,6 +219,7 @@ pub fn get_session_by_id(session_id: &str) -> Result<(Session, String), String> 
         .prepare(
             "SELECT s.id, s.slug, s.title, s.agent, s.model, s.cost, s.tokens_input, s.tokens_output,
                     s.summary_additions, s.summary_deletions, s.parent_id, s.time_created, s.time_updated,
+                    s.directory,
                     (SELECT p.data FROM part p
                      JOIN message m ON p.message_id = m.id
                      WHERE m.session_id = s.id
@@ -235,7 +247,8 @@ pub fn get_session_by_id(session_id: &str) -> Result<(Session, String), String> 
             let parent_id: Option<String> = row.get(10)?;
             let time_created: i64 = row.get(11)?;
             let time_updated: i64 = row.get(12)?;
-            let first_message_raw: Option<String> = row.get(13)?;
+            let directory: String = row.get(13)?;
+            let first_message_raw: Option<String> = row.get(14)?;
 
             let (model_name, model_provider) = parse_model_json(&model_str);
             let file_changes = summary_additions.unwrap_or(0) + summary_deletions.unwrap_or(0);
@@ -249,19 +262,22 @@ pub fn get_session_by_id(session_id: &str) -> Result<(Session, String), String> 
 
             Ok((
                 Session {
+                    source: SessionSource::OpenCode,
                     id,
+                    directory,
                     title,
                     slug,
                     agent,
-                    model_name,
-                    cost,
-                    tokens_input,
-                    tokens_output,
+                    model_name: Some(model_name),
+                    cost: Some(cost),
+                    tokens_input: Some(tokens_input),
+                    tokens_output: Some(tokens_output),
+                    tokens_total: Some(tokens_input + tokens_output),
                     time_created: epoch_to_iso(time_created),
                     time_updated: epoch_to_iso(time_updated),
                     time_ago: time_ago(time_updated),
                     parent_id,
-                    file_changes,
+                    file_changes: Some(file_changes),
                     first_message,
                     hidden: false,
                     pinned: false,
@@ -278,7 +294,10 @@ pub fn get_session_by_id(session_id: &str) -> Result<(Session, String), String> 
 fn extract_text_from_part(data_str: &str) -> Option<String> {
     serde_json::from_str::<serde_json::Value>(data_str)
         .ok()
-        .and_then(|v| v.get("text").and_then(|t| t.as_str().map(|s| s.to_string())))
+        .and_then(|v| {
+            v.get("text")
+                .and_then(|t| t.as_str().map(|s| s.to_string()))
+        })
 }
 
 pub fn get_first_user_text(session_id: &str, conn: &Connection) -> Option<String> {
@@ -317,8 +336,8 @@ pub fn get_session_detail(session_id: &str) -> Result<SessionDetail, String> {
     Ok(SessionDetail {
         first_message: session.first_message.clone(),
         session,
-        messages_count,
-        model_provider,
+        messages_count: Some(messages_count),
+        model_provider: Some(model_provider),
     })
 }
 
@@ -349,7 +368,9 @@ pub fn get_session_count_for_directory(directory: &str) -> Result<i64, String> {
     .map_err(|e| format!("Failed to count sessions: {}", e))
 }
 
-pub fn get_session_summaries_by_ids(session_ids: &[String]) -> Result<HashMap<String, SessionSummary>, String> {
+pub fn get_session_summaries_by_ids(
+    session_ids: &[String],
+) -> Result<HashMap<String, SessionSummary>, String> {
     if session_ids.is_empty() {
         return Ok(HashMap::new());
     }
@@ -359,8 +380,13 @@ pub fn get_session_summaries_by_ids(session_ids: &[String]) -> Result<HashMap<St
         "SELECT id, title, directory, time_created, time_updated, cost FROM session WHERE id IN ({})",
         placeholders.join(",")
     );
-    let mut stmt = conn.prepare(&sql).map_err(|e| format!("Failed to prepare: {}", e))?;
-    let params: Vec<&dyn rusqlite::types::ToSql> = session_ids.iter().map(|s| s as &dyn rusqlite::types::ToSql).collect();
+    let mut stmt = conn
+        .prepare(&sql)
+        .map_err(|e| format!("Failed to prepare: {}", e))?;
+    let params: Vec<&dyn rusqlite::types::ToSql> = session_ids
+        .iter()
+        .map(|s| s as &dyn rusqlite::types::ToSql)
+        .collect();
     let rows = stmt
         .query_map(params.as_slice(), |row| {
             let id: String = row.get(0)?;

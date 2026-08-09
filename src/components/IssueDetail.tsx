@@ -1,18 +1,19 @@
 import { useState, useMemo, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { Bug, Terminal, Play, FolderOpen, Trash2, Pencil, Send, Clock, AlertTriangle, X, MessageSquare, GitFork, Check, Loader2, Unlink } from "lucide-react";
-import type { IssueWithSessions, IssueComment, Session } from "../types";
+import { Bug, Terminal, SquareTerminal, Play, FolderOpen, Trash2, Pencil, Send, Clock, AlertTriangle, X, MessageSquare, GitFork, Check, Loader2, Unlink } from "lucide-react";
+import type { IssueWithSessions, IssueComment, Session, SessionSource } from "../types";
 import ContextMenu from "./ContextMenu";
 import type { MenuItem } from "./ContextMenu";
+import { sessionKey } from "../utils/sessionCommand";
 
 interface Props {
   issue: IssueWithSessions;
   onEdit: () => void;
   onDelete: () => void;
-  onOpenSession: (sessionId: string, directory: string) => void;
+  onOpenSession: (source: SessionSource, sessionId: string, directory: string) => void;
   onOpenFileManager: (directory: string) => void;
-  onOpenInTerminal: (directory: string, sessionId?: string) => void;
-  onUnlinkSession: (sessionId: string) => void;
+  onOpenInTerminal: (directory: string, source: SessionSource, sessionId?: string) => void;
+  onUnlinkSession: (source: SessionSource, sessionId: string) => void;
   onOpenDirectory: (directory: string) => void;
   onUnlinkDirectory: (directory: string) => void;
 }
@@ -44,7 +45,7 @@ export default function IssueDetail({ issue, onEdit, onDelete, onOpenSession, on
   const [forkingId, setForkingId] = useState<string | null>(null);
   const [forkSuccess, setForkSuccess] = useState<Record<string, boolean>>({});
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  const [sessionCtx, setSessionCtx] = useState<{ sessionId: string; x: number; y: number } | null>(null);
+  const [sessionCtx, setSessionCtx] = useState<{ source: SessionSource; sessionId: string; x: number; y: number } | null>(null);
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set(issue.directories.map(d => d.directory)));
   const [dirSessions, setDirSessions] = useState<Record<string, Session[]>>({});
   const [loadingDirSessions, setLoadingDirSessions] = useState<Set<string>>(new Set());
@@ -135,22 +136,24 @@ export default function IssueDetail({ issue, onEdit, onDelete, onOpenSession, on
     }
   }
 
-  async function handleFork(sessionId: string, directory: string) {
-    setForkingId(sessionId);
+  async function handleFork(source: SessionSource, sessionId: string, directory: string) {
+    const key = sessionKey(source, sessionId);
+    setForkingId(key);
+    const forkStartTime = Date.now();
     try {
-      await invoke<void>("fork_session", { directory, sessionId });
+      await invoke<void>("fork_session", { directory, sessionSource: source, sessionId });
 
-      const forkStartTime = Date.now();
+      // Codex does not expose a reliable parent relation in the thread index.
+      // Launch the fork, but leave issue linking as an explicit user action.
+      if (source === "codex") return;
+
       while (true) {
         try {
           const sessions = await invoke<Session[]>("get_sessions", { directory });
-          const match = sessions.find(s =>
-            s.parent_id === sessionId ||
-            (new Date(s.time_created).getTime() > forkStartTime && s.id !== sessionId)
-          );
+          const match = sessions.find(s => s.source === source && s.parent_id === sessionId);
           if (match) {
-            await invoke<void>("link_session_to_issue", { sessionId: match.id, issueId: issue.issue.id, directory });
-            setForkSuccess(prev => ({ ...prev, [sessionId]: true }));
+            await invoke<void>("link_session_to_issue", { sessionSource: match.source, sessionId: match.id, issueId: issue.issue.id, directory });
+            setForkSuccess(prev => ({ ...prev, [key]: true }));
             return;
           }
         } catch (e) {
@@ -161,8 +164,9 @@ export default function IssueDetail({ issue, onEdit, onDelete, onOpenSession, on
       }
     } catch (e) {
       console.error("Fork session error:", e);
+    } finally {
+      setForkingId(null);
     }
-    setForkingId(null);
   }
 
   return (
@@ -223,10 +227,15 @@ export default function IssueDetail({ issue, onEdit, onDelete, onOpenSession, on
                           >
                             <FolderOpen size={11} />
                           </button>
-                          <button onClick={e => { e.stopPropagation(); onOpenInTerminal(d.directory); }}
+                          <button onClick={e => { e.stopPropagation(); onOpenInTerminal(d.directory, "opencode"); }}
                             className="text-gray-400 hover:text-white transition-colors p-0.5" title="打开 OpenCode"
                           >
                             <Terminal size={11} />
+                          </button>
+                          <button onClick={e => { e.stopPropagation(); onOpenInTerminal(d.directory, "codex"); }}
+                            className="text-gray-400 hover:text-white transition-colors p-0.5" title="打开 Codex"
+                          >
+                            <SquareTerminal size={11} />
                           </button>
                           <button onClick={e => { e.stopPropagation(); onUnlinkDirectory(d.directory); }}
                             className="text-gray-400 hover:text-red-400 transition-colors p-0.5" title="取消关联目录"
@@ -245,13 +254,13 @@ export default function IssueDetail({ issue, onEdit, onDelete, onOpenSession, on
                             <div className="px-3 py-3 text-xs text-gray-500">暂无会话</div>
                           ) : (
                             sessions.map(s => (
-                              <div key={s.id}
+                              <div key={sessionKey(s.source, s.id)}
                                 className="flex items-center gap-2 px-3 py-2 text-xs text-gray-300 hover:bg-surface-hover cursor-pointer transition-colors border-t border-surface-border"
-                                onClick={() => onOpenSession(s.id, d.directory)}
+                                onClick={() => onOpenSession(s.source, s.id, d.directory)}
                               >
                                 <Play size={10} className="text-indigo-400 flex-shrink-0" />
                                 <span className="truncate flex-1">{s.title || s.slug}</span>
-                                {s.cost > 0 && (
+                                {s.cost != null && s.cost > 0 && (
                                   <span className="text-xs text-emerald-400 flex-shrink-0">${s.cost.toFixed(3)}</span>
                                 )}
                                 <span className="text-gray-500 flex-shrink-0">{s.time_ago}</span>
@@ -278,28 +287,30 @@ export default function IssueDetail({ issue, onEdit, onDelete, onOpenSession, on
                   >
                     <FolderOpen size={11} />
                   </button>
-                  <button onClick={() => onOpenInTerminal(dir)}
-                    className="text-gray-500 hover:text-gray-200 transition-colors p-0.5" title="打开 OpenCode"
+                  <button onClick={() => onOpenInTerminal(dir, sessions[0].session_source)}
+                    className="text-gray-500 hover:text-gray-200 transition-colors p-0.5"
+                    title={`打开 ${sessions[0].session_source === "codex" ? "Codex" : "OpenCode"}`}
                   >
                     <Terminal size={11} />
                   </button>
                 </div>
                 {sessions.map(s => {
-                  const isForking = forkingId === s.session_id;
-                  const isSuccess = forkSuccess[s.session_id];
+                  const key = sessionKey(s.session_source, s.session_id);
+                  const isForking = forkingId === key;
+                  const isSuccess = forkSuccess[key];
                   return (
-                    <div key={s.session_id}
+                    <div key={key}
                       className="group flex items-center gap-2 px-3 py-2 text-xs text-gray-300 hover:bg-surface-hover cursor-pointer transition-colors border-t border-surface-border"
-                      onClick={() => onOpenSession(s.session_id, s.directory)}
+                      onClick={() => onOpenSession(s.session_source, s.session_id, s.directory)}
                       onContextMenu={e => {
                         e.preventDefault();
                         e.stopPropagation();
-                        setSessionCtx({ sessionId: s.session_id, x: e.clientX, y: e.clientY });
+                        setSessionCtx({ source: s.session_source, sessionId: s.session_id, x: e.clientX, y: e.clientY });
                       }}
                     >
                       <Play size={10} className="text-indigo-400 flex-shrink-0" />
                       <span className="truncate flex-1">{s.session_title || "Untitled"}</span>
-                      {s.cost > 0 && (
+                      {s.cost != null && s.cost > 0 && (
                         <span className="text-xs text-emerald-400 flex-shrink-0">${s.cost.toFixed(3)}</span>
                       )}
                       <span className="text-gray-500 flex-shrink-0">{s.time_ago}</span>
@@ -309,8 +320,9 @@ export default function IssueDetail({ issue, onEdit, onDelete, onOpenSession, on
                         >
                           <FolderOpen size={11} />
                         </button>
-                        <button onClick={e => { e.stopPropagation(); onOpenInTerminal(s.directory, s.session_id); }}
-                          className="text-gray-400 hover:text-white transition-colors p-0.5" title="打开 OpenCode"
+                        <button onClick={e => { e.stopPropagation(); onOpenInTerminal(s.directory, s.session_source, s.session_id); }}
+                          className="text-gray-400 hover:text-white transition-colors p-0.5"
+                          title={`打开 ${s.session_source === "codex" ? "Codex" : "OpenCode"}`}
                         >
                           <Terminal size={11} />
                         </button>
@@ -319,9 +331,10 @@ export default function IssueDetail({ issue, onEdit, onDelete, onOpenSession, on
                             <Check size={11} />
                           </span>
                         ) : (
-                          <button onClick={e => { e.stopPropagation(); handleFork(s.session_id, s.directory); }}
+                          <button onClick={e => { e.stopPropagation(); handleFork(s.session_source, s.session_id, s.directory); }}
                             disabled={!!isForking}
-                            className="text-gray-400 hover:text-indigo-300 disabled:text-gray-600 transition-colors p-0.5" title="Fork 新会话并关联到此 Issue"
+                            className="text-gray-400 hover:text-indigo-300 disabled:text-gray-600 transition-colors p-0.5"
+                            title={s.session_source === "codex" ? "Fork Codex 会话（新会话需手动关联）" : "Fork 新会话并关联到此 Issue"}
                           >
                             {isForking ? <Loader2 size={11} className="animate-spin" /> : <GitFork size={11} />}
                           </button>
@@ -395,7 +408,7 @@ export default function IssueDetail({ issue, onEdit, onDelete, onOpenSession, on
               label: "取消关联 Issue",
               icon: <Unlink size={14} />,
               danger: true,
-              onClick: () => onUnlinkSession(sessionCtx.sessionId),
+              onClick: () => onUnlinkSession(sessionCtx.source, sessionCtx.sessionId),
             },
           ]}
           onClose={() => setSessionCtx(null)}

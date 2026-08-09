@@ -1,17 +1,20 @@
 import { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import type { SessionSource } from "../types";
 
 interface Props {
   directory: string;
   defaultName: string;
-  onConfirm: (name: string, base: string) => void;
+  initialSource: SessionSource;
+  onConfirm: (name: string, base: string, source: SessionSource) => void;
   onClose: () => void;
 }
 
-export default function WorktreeModal({ directory, defaultName, onConfirm, onClose }: Props) {
+export default function WorktreeModal({ directory, defaultName, initialSource, onConfirm, onClose }: Props) {
   const [name, setName] = useState(defaultName);
   const [selectedBase, setSelectedBase] = useState("HEAD");
   const [customBase, setCustomBase] = useState("");
+  const [source, setSource] = useState<SessionSource>(initialSource);
   const [bases, setBases] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -38,7 +41,7 @@ export default function WorktreeModal({ directory, defaultName, onConfirm, onClo
   function handleSubmit() {
     const trimmed = name.trim();
     if (trimmed) {
-      onConfirm(trimmed, resolvedBase);
+      onConfirm(trimmed, resolvedBase, source);
     }
   }
 
@@ -87,6 +90,24 @@ export default function WorktreeModal({ directory, defaultName, onConfirm, onClo
             onChange={e => setCustomBase(e.target.value)}
           />
         )}
+
+        <label className="text-xs text-gray-400 mb-1 block">启动方式</label>
+        <div className="grid grid-cols-2 bg-surface-hover border border-surface-border rounded-md p-0.5 mb-4">
+          {(["opencode", "codex"] as SessionSource[]).map(value => (
+            <button
+              key={value}
+              type="button"
+              onClick={() => setSource(value)}
+              className={`px-3 py-1.5 text-xs rounded transition-colors ${
+                source === value
+                  ? "bg-surface-border text-gray-100"
+                  : "text-gray-500 hover:text-gray-300"
+              }`}
+            >
+              {value === "codex" ? "Codex" : "OpenCode"}
+            </button>
+          ))}
+        </div>
 
         <div className="flex justify-end gap-2 mt-2">
           <button

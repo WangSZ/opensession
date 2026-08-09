@@ -1,12 +1,12 @@
-use crate::db;
 use crate::models::*;
+use crate::session_sources::SessionSource;
 
 use super::git_info;
 use super::meta;
 
 #[tauri::command]
 pub async fn list_directories(app: tauri::AppHandle) -> Result<Vec<DirectoryGroup>, String> {
-    let mut groups = db::list_directory_groups()?;
+    let mut groups = crate::session_repository::list_directory_groups()?;
     meta::merge_into(&mut groups);
     let stale = git_info::apply_cached_and_hide(&mut groups);
     if !stale.is_empty() {
@@ -16,11 +16,16 @@ pub async fn list_directories(app: tauri::AppHandle) -> Result<Vec<DirectoryGrou
 }
 
 #[tauri::command]
+pub fn get_source_statuses() -> SourceStatuses {
+    crate::session_repository::get_source_statuses()
+}
+
+#[tauri::command]
 pub async fn search_directories(
     _app: tauri::AppHandle,
     query: String,
 ) -> Result<Vec<DirectoryGroup>, String> {
-    let mut groups = db::list_directory_groups()?;
+    let mut groups = crate::session_repository::list_directory_groups()?;
     meta::merge_into(&mut groups);
     git_info::apply_cached_and_hide(&mut groups);
     let query_lower = query.to_lowercase();
@@ -35,12 +40,15 @@ pub async fn search_directories(
 
 #[tauri::command]
 pub fn get_sessions(directory: String) -> Result<Vec<Session>, String> {
-    let mut sessions = db::get_sessions(&directory)?;
+    let mut sessions = crate::session_repository::get_sessions(&directory)?;
     super::session_meta::merge_into_sessions(&mut sessions);
     Ok(sessions)
 }
 
 #[tauri::command]
-pub fn get_session_detail(session_id: String) -> Result<SessionDetail, String> {
-    db::get_session_detail(&session_id)
+pub fn get_session_detail(
+    session_source: SessionSource,
+    session_id: String,
+) -> Result<SessionDetail, String> {
+    crate::session_repository::get_session_detail(session_source, &session_id)
 }

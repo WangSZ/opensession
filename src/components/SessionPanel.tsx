@@ -1,30 +1,46 @@
-import { useState, useMemo, useRef } from "react";
+import { useState, useMemo, useRef, useEffect } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { MessageSquare, Loader2, Search, Eye, EyeOff } from "lucide-react";
 import SessionCard from "./SessionCard";
-import CopyButton from "./CopyButton";
-import type { Session, Issue } from "../types";
+import type { Session, SessionSource, Issue } from "../types";
+import { sessionKey } from "../utils/sessionCommand";
 
 interface Props {
   directory: string | null;
   sessions: Session[];
   loading: boolean;
-  onResume: (sessionId: string) => void;
-  onDetail: (sessionId: string) => void;
-  onContextMenu: (sessionId: string, x: number, y: number) => void;
-  onSetNote: (sessionId: string, note: string) => void;
+  onStart: (source: SessionSource) => void;
+  onResume: (session: Session) => void;
+  onDetail: (session: Session) => void;
+  onContextMenu: (session: Session, x: number, y: number) => void;
+  onSetNote: (session: Session, note: string) => void;
   sessionIssueMap?: Record<string, Issue>;
   dirIssueMap?: Record<string, Issue>;
-  highlightedSessionId?: string | null;
+  highlightedSessionKey?: string | null;
 }
 
-export default function SessionPanel({ directory, sessions, loading, onResume, onDetail, onContextMenu, onSetNote, sessionIssueMap, dirIssueMap, highlightedSessionId }: Props) {
+export default function SessionPanel({ directory, sessions, loading, onStart, onResume, onDetail, onContextMenu, onSetNote, sessionIssueMap, dirIssueMap, highlightedSessionKey }: Props) {
   const [searchQuery, setSearchQuery] = useState("");
   const [showHidden, setShowHidden] = useState(false);
+  const [sourceFilter, setSourceFilter] = useState<"all" | SessionSource>("all");
   const parentRef = useRef<HTMLDivElement>(null);
+
+  const sourceCounts = useMemo(() => ({
+    opencode: sessions.filter(session => session.source === "opencode").length,
+    codex: sessions.filter(session => session.source === "codex").length,
+  }), [sessions]);
+
+  useEffect(() => {
+    if (sourceFilter !== "all" && sourceCounts[sourceFilter] === 0) {
+      setSourceFilter("all");
+    }
+  }, [sourceCounts, sourceFilter]);
 
   const filteredSessions = useMemo(() => {
     let list = sessions;
+    if (sourceFilter !== "all") {
+      list = list.filter(session => session.source === sourceFilter);
+    }
     if (!showHidden) {
       list = list.filter(s => !s.hidden);
     }
@@ -38,7 +54,7 @@ export default function SessionPanel({ directory, sessions, loading, onResume, o
       );
     }
     return [...list].sort((a, b) => Number(b.pinned) - Number(a.pinned));
-  }, [sessions, searchQuery, showHidden]);
+  }, [sessions, searchQuery, showHidden, sourceFilter]);
 
   const virtualizer = useVirtualizer({
     count: filteredSessions.length,
@@ -62,12 +78,35 @@ export default function SessionPanel({ directory, sessions, loading, onResume, o
     <div className="flex-1 flex flex-col min-w-0">
       <div className="px-5 py-3 border-b border-surface-border flex items-center gap-2">
         <code className="text-xs text-gray-300 font-mono truncate flex-1 min-w-0">
-          cd &quot;{directory}&quot; &amp;&amp; opencode
+          {directory}
         </code>
-        <CopyButton text={`cd "${directory}" && opencode`} />
+        <button onClick={() => onStart("opencode")} className="px-2 py-1 text-xs rounded bg-indigo-500/15 text-indigo-300 hover:bg-indigo-500/25" title="Open OpenCode">
+          OpenCode
+        </button>
+        <button onClick={() => onStart("codex")} className="px-2 py-1 text-xs rounded bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25" title="Open Codex">
+          Codex
+        </button>
       </div>
 
       <div className="px-5 py-2 border-b border-surface-border flex items-center gap-2">
+        <div className="flex items-center bg-surface-hover border border-surface-border rounded-md p-0.5 flex-shrink-0">
+          {([
+            ["all", "全部", sessions.length],
+            ["opencode", "OpenCode", sourceCounts.opencode],
+            ["codex", "Codex", sourceCounts.codex],
+          ] as const).map(([value, label, count]) => (
+            <button
+              key={value}
+              onClick={() => setSourceFilter(value)}
+              disabled={value !== "all" && count === 0}
+              className={`px-2 py-1 text-xs rounded transition-colors ${
+                sourceFilter === value ? "bg-surface-border text-gray-100" : "text-gray-500 hover:text-gray-300"
+              } disabled:opacity-30 disabled:cursor-not-allowed`}
+            >
+              {label} {count}
+            </button>
+          ))}
+        </div>
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={14} />
           <input
@@ -112,7 +151,7 @@ export default function SessionPanel({ directory, sessions, loading, onResume, o
           >
             {virtualizer.getVirtualItems().map(item => (
               <div
-                key={item.key}
+                key={sessionKey(filteredSessions[item.index].source, filteredSessions[item.index].id)}
                 style={{
                   position: "absolute",
                   top: 0,
@@ -125,15 +164,15 @@ export default function SessionPanel({ directory, sessions, loading, onResume, o
                 <SessionCard
                   session={filteredSessions[item.index]}
                   directory={directory}
-                  onResume={() => onResume(filteredSessions[item.index].id)}
-                  onDetail={() => onDetail(filteredSessions[item.index].id)}
+                  onResume={() => onResume(filteredSessions[item.index])}
+                  onDetail={() => onDetail(filteredSessions[item.index])}
                   onContextMenu={(e) => {
                     e.preventDefault();
-                    onContextMenu(filteredSessions[item.index].id, e.clientX, e.clientY);
+                    onContextMenu(filteredSessions[item.index], e.clientX, e.clientY);
                   }}
-                  onSetNote={(note) => onSetNote(filteredSessions[item.index].id, note)}
-                  issue={sessionIssueMap?.[filteredSessions[item.index].id] ?? dirIssueMap?.[directory] ?? null}
-                  highlighted={highlightedSessionId === filteredSessions[item.index].id}
+                  onSetNote={(note) => onSetNote(filteredSessions[item.index], note)}
+                  issue={sessionIssueMap?.[sessionKey(filteredSessions[item.index].source, filteredSessions[item.index].id)] ?? dirIssueMap?.[directory] ?? null}
+                  highlighted={highlightedSessionKey === sessionKey(filteredSessions[item.index].source, filteredSessions[item.index].id)}
                 />
               </div>
             ))}

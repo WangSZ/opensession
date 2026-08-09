@@ -6,9 +6,9 @@ use tauri::Emitter;
 
 #[tauri::command]
 pub async fn generate_summary(app: tauri::AppHandle, directory: String) -> Result<(), String> {
+    let directory = crate::session_repository::normalize_directory_path(&directory);
     let temp_dir = std::env::temp_dir().join("opensession-opencode");
-    std::fs::create_dir_all(&temp_dir)
-        .map_err(|e| format!("Failed to create temp dir: {}", e))?;
+    std::fs::create_dir_all(&temp_dir).map_err(|e| format!("Failed to create temp dir: {}", e))?;
 
     let agents_md_path = std::path::Path::new(&directory).join("AGENTS.md");
     let agents_md = if agents_md_path.exists() {
@@ -27,7 +27,7 @@ pub async fn generate_summary(app: tauri::AppHandle, directory: String) -> Resul
         String::new()
     };
 
-    let titles = crate::db::get_recent_session_titles(&directory, 5)
+    let titles = crate::session_repository::get_recent_session_titles(&directory, 5)
         .unwrap_or_default()
         .join(", ");
 
@@ -37,17 +37,47 @@ pub async fn generate_summary(app: tauri::AppHandle, directory: String) -> Resul
     );
 
     tauri::async_runtime::spawn(async move {
-        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
-        let escaped_dir = directory.replace('\'', "'\\''");
-        let escaped_prompt = prompt.replace('\'', "'\\''");
-        let shell_cmd = format!("opencode run --dir '{}' '{}'", escaped_dir, escaped_prompt);
-
-        match tokio::process::Command::new(&shell)
-            .args(["-lc", &shell_cmd])
-            .current_dir(&temp_dir)
+        let opencode_available = tokio::process::Command::new("opencode")
+            .arg("--version")
             .output()
             .await
-        {
+            .map(|output| output.status.success())
+            .unwrap_or(false);
+
+        let (engine, output) = if opencode_available {
+            let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
+            let escaped_dir = directory.replace('\'', "'\\''");
+            let escaped_prompt = prompt.replace('\'', "'\\''");
+            let shell_cmd = format!("opencode run --dir '{}' '{}'", escaped_dir, escaped_prompt);
+            (
+                "opencode",
+                tokio::process::Command::new(&shell)
+                    .args(["-lc", &shell_cmd])
+                    .current_dir(&temp_dir)
+                    .output()
+                    .await,
+            )
+        } else {
+            (
+                "codex",
+                tokio::process::Command::new("codex")
+                    .args([
+                        "exec",
+                        "--ephemeral",
+                        "--skip-git-repo-check",
+                        "--sandbox",
+                        "read-only",
+                        "--cd",
+                        &directory,
+                        &prompt,
+                    ])
+                    .current_dir(&temp_dir)
+                    .output()
+                    .await,
+            )
+        };
+
+        match output {
             Ok(output) if output.status.success() => {
                 let stdout = String::from_utf8_lossy(&output.stdout).to_string();
                 let lines: Vec<&str> = stdout.trim().lines().collect();
@@ -71,6 +101,7 @@ pub async fn generate_summary(app: tauri::AppHandle, directory: String) -> Resul
                         std::fs::read_to_string(&cache_path)
                             .ok()
                             .and_then(|s| serde_json::from_str(&s).ok())
+                            .map(crate::session_repository::normalize_summary_keys)
                             .unwrap_or_default()
                     } else {
                         HashMap::new()
@@ -90,13 +121,13 @@ pub async fn generate_summary(app: tauri::AppHandle, directory: String) -> Resul
                 let stderr = String::from_utf8_lossy(&output.stderr);
                 let _ = app.emit(
                     "summary://generated",
-                    json!({ "directory": directory, "error": format!("opencode failed: {}", stderr) }),
+                    json!({ "directory": directory, "error": format!("{} failed: {}", engine, stderr) }),
                 );
             }
             Err(e) => {
                 let _ = app.emit(
                     "summary://generated",
-                    json!({ "directory": directory, "error": format!("Failed to execute opencode: {}", e) }),
+                    json!({ "directory": directory, "error": format!("Failed to execute {}: {}", engine, e) }),
                 );
             }
         }
@@ -107,6 +138,7 @@ pub async fn generate_summary(app: tauri::AppHandle, directory: String) -> Resul
 
 #[tauri::command]
 pub fn set_cached_summary(directory: String, summary: Summary) -> Result<(), String> {
+    let directory = crate::session_repository::normalize_directory_path(&directory);
     let data_dir = crate::config::app_data_dir();
     std::fs::create_dir_all(&data_dir).map_err(|e| format!("Failed to create data dir: {}", e))?;
     let cache_path = data_dir.join("summaries.json");
@@ -114,6 +146,7 @@ pub fn set_cached_summary(directory: String, summary: Summary) -> Result<(), Str
         std::fs::read_to_string(&cache_path)
             .ok()
             .and_then(|s| serde_json::from_str(&s).ok())
+            .map(crate::session_repository::normalize_summary_keys)
             .unwrap_or_default()
     } else {
         HashMap::new()
@@ -128,13 +161,17 @@ pub fn set_cached_summary(directory: String, summary: Summary) -> Result<(), Str
 
 #[tauri::command]
 pub fn delete_cached_summary(directory: String) -> Result<(), String> {
+    let directory = crate::session_repository::normalize_directory_path(&directory);
     let cache_path = crate::config::app_data_dir().join("summaries.json");
     if !cache_path.exists() {
         return Ok(());
     }
     let mut summaries: HashMap<String, Summary> = std::fs::read_to_string(&cache_path)
         .map_err(|e| format!("Failed to read cache: {}", e))
-        .and_then(|s| serde_json::from_str(&s).map_err(|e| format!("Failed to parse cache: {}", e)))?;
+        .and_then(|s| {
+            serde_json::from_str(&s).map_err(|e| format!("Failed to parse cache: {}", e))
+        })?;
+    summaries = crate::session_repository::normalize_summary_keys(summaries);
     summaries.remove(&directory);
     serde_json::to_string_pretty(&summaries)
         .map_err(|e| format!("Failed to serialize: {}", e))
@@ -145,12 +182,16 @@ pub fn delete_cached_summary(directory: String) -> Result<(), String> {
 
 #[tauri::command]
 pub fn get_cached_summary(directory: String) -> Result<Option<Summary>, String> {
+    let directory = crate::session_repository::normalize_directory_path(&directory);
     let cache_path = crate::config::app_data_dir().join("summaries.json");
     if !cache_path.exists() {
         return Ok(None);
     }
     let summaries: HashMap<String, Summary> = std::fs::read_to_string(&cache_path)
         .map_err(|e| format!("Failed to read cache: {}", e))
-        .and_then(|s| serde_json::from_str(&s).map_err(|e| format!("Failed to parse cache: {}", e)))?;
+        .and_then(|s| {
+            serde_json::from_str(&s).map_err(|e| format!("Failed to parse cache: {}", e))
+        })?;
+    let summaries = crate::session_repository::normalize_summary_keys(summaries);
     Ok(summaries.get(&directory).cloned())
 }

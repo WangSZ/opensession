@@ -1,15 +1,17 @@
+#[cfg(target_os = "windows")]
+use crate::session_sources::windows_command_line;
+use crate::session_sources::{
+    is_valid_session_id, session_command, shell_command_line, SessionAction, SessionSource,
+};
+
 #[tauri::command]
 pub fn open_plain_terminal(directory: String) -> Result<(), String> {
     check_directory_exists(&directory)?;
 
     #[cfg(target_os = "macos")]
     {
-        let script = format!(
-            "tell app \"Terminal\"\nactivate\ndo script \"cd \\\"{}\\\"\"\nend tell",
-            directory
-        );
-        std::process::Command::new("osascript")
-            .args(["-e", &script])
+        std::process::Command::new("open")
+            .args(["-a", "Terminal", &directory])
             .spawn()
             .map_err(|e| format!("Failed to open Terminal: {}", e))?;
     }
@@ -25,7 +27,7 @@ pub fn open_plain_terminal(directory: String) -> Result<(), String> {
 
     #[cfg(target_os = "linux")]
     {
-        let cmd = format!("cd \"{}\" && exec bash", directory);
+        let cmd = shell_command_line(directory, &["exec".into(), "bash".into()]);
         std::process::Command::new("x-terminal-emulator")
             .args(["-e", "bash", "-c", &cmd])
             .spawn()
@@ -56,42 +58,51 @@ fn get_repo_root(directory: &str) -> Result<String, String> {
 }
 
 #[tauri::command]
-pub fn open_in_terminal(directory: String, session_id: Option<String>) -> Result<(), String> {
+pub fn open_in_terminal(
+    directory: String,
+    session_source: SessionSource,
+    session_id: Option<String>,
+) -> Result<(), String> {
     check_directory_exists(&directory)?;
+    if let Some(session_id) = session_id.as_deref() {
+        validate_session_id(session_id)?;
+    }
+    let action = if session_id.is_some() {
+        SessionAction::Resume
+    } else {
+        SessionAction::Start
+    };
+    let args = session_command(session_source, session_id.as_deref(), action);
+    launch_cli_in_terminal(&directory, &args, "session")
+}
 
-    let session_arg = session_id
-        .as_ref()
-        .map(|s| format!("--session {}", s))
-        .unwrap_or_default();
-
+fn launch_cli_in_terminal(directory: &str, args: &[String], prefix: &str) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
         use std::io::Write;
         use std::os::unix::fs::PermissionsExt;
 
         let script_content = format!(
-            "#!/bin/sh\ncd \"{}\" && opencode {}\nrm \"$0\"\n",
-            directory, session_arg
+            "#!/bin/sh\n{}\nrm \"$0\"\n",
+            shell_command_line(directory, args)
         );
-
-        let script_path = std::env::temp_dir()
-            .join(format!("opencode_launch_{}.sh", std::process::id()));
-
+        let script_path = std::env::temp_dir().join(format!(
+            "opensession_{}_{}.sh",
+            prefix,
+            uuid::Uuid::new_v4()
+        ));
         {
-            let mut f = std::fs::File::create(&script_path)
+            let mut file = std::fs::File::create(&script_path)
                 .map_err(|e| format!("Failed to create temp script: {}", e))?;
-            f.write_all(script_content.as_bytes())
+            file.write_all(script_content.as_bytes())
                 .map_err(|e| format!("Failed to write temp script: {}", e))?;
         }
-
         std::fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o755))
             .map_err(|e| format!("Failed to set permissions on temp script: {}", e))?;
-
         let script = format!(
             "tell app \"Terminal\"\nactivate\ndo script \"bash \\\"{}\\\"\"\nend tell",
             script_path.display()
         );
-
         std::process::Command::new("osascript")
             .args(["-e", &script])
             .spawn()
@@ -100,7 +111,7 @@ pub fn open_in_terminal(directory: String, session_id: Option<String>) -> Result
 
     #[cfg(target_os = "windows")]
     {
-        let cmd = format!("cd /d \"{}\" && opencode {}", directory, session_arg);
+        let cmd = windows_command_line(directory, args);
         std::process::Command::new("cmd")
             .args(["/c", "start", "wt", "cmd", "/k", &cmd])
             .spawn()
@@ -109,7 +120,7 @@ pub fn open_in_terminal(directory: String, session_id: Option<String>) -> Result
 
     #[cfg(target_os = "linux")]
     {
-        let cmd = format!("cd \"{}\" && opencode {}", directory, session_arg);
+        let cmd = shell_command_line(directory, args);
         std::process::Command::new("x-terminal-emulator")
             .args(["-e", "bash", "-c", &cmd])
             .spawn()
@@ -120,7 +131,12 @@ pub fn open_in_terminal(directory: String, session_id: Option<String>) -> Result
 }
 
 #[tauri::command]
-pub fn open_worktree(directory: String, branch_name: String, base: String) -> Result<(), String> {
+pub fn open_worktree(
+    directory: String,
+    branch_name: String,
+    base: String,
+    session_source: SessionSource,
+) -> Result<(), String> {
     check_directory_exists(&directory)?;
     let repo_root = get_repo_root(&directory)?;
     let repo_path = std::path::Path::new(&repo_root);
@@ -161,60 +177,8 @@ pub fn open_worktree(directory: String, branch_name: String, base: String) -> Re
     }
 
     let target = worktree_path.to_string_lossy().to_string();
-
-    #[cfg(target_os = "macos")]
-    {
-        use std::io::Write;
-        use std::os::unix::fs::PermissionsExt;
-
-        let script_content = format!(
-            "#!/bin/sh\ncd \"{}\" && opencode\nrm \"$0\"\n",
-            target
-        );
-
-        let script_path = std::env::temp_dir()
-            .join(format!("opencode_worktree_{}.sh", std::process::id()));
-
-        {
-            let mut f = std::fs::File::create(&script_path)
-                .map_err(|e| format!("Failed to create temp script: {}", e))?;
-            f.write_all(script_content.as_bytes())
-                .map_err(|e| format!("Failed to write temp script: {}", e))?;
-        }
-
-        std::fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o755))
-            .map_err(|e| format!("Failed to set permissions on temp script: {}", e))?;
-
-        let script = format!(
-            "tell app \"Terminal\"\nactivate\ndo script \"bash \\\"{}\\\"\"\nend tell",
-            script_path.display()
-        );
-
-        std::process::Command::new("osascript")
-            .args(["-e", &script])
-            .spawn()
-            .map_err(|e| format!("Failed to open Terminal: {}", e))?;
-    }
-
-    #[cfg(target_os = "windows")]
-    {
-        let cmd = format!("cd /d \"{}\" && opencode", target);
-        std::process::Command::new("cmd")
-            .args(["/c", "start", "wt", "cmd", "/k", &cmd])
-            .spawn()
-            .map_err(|e| format!("Failed to open terminal: {}", e))?;
-    }
-
-    #[cfg(target_os = "linux")]
-    {
-        let cmd = format!("cd \"{}\" && opencode", target);
-        std::process::Command::new("x-terminal-emulator")
-            .args(["-e", "bash", "-c", &cmd])
-            .spawn()
-            .map_err(|e| format!("Failed to open terminal: {}", e))?;
-    }
-
-    Ok(())
+    let args = session_command(session_source, None, SessionAction::Start);
+    launch_cli_in_terminal(&target, &args, "worktree")
 }
 
 #[tauri::command]
@@ -297,119 +261,28 @@ pub fn remove_worktree(path: String, force: bool) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn fork_session(directory: String, session_id: String) -> Result<(), String> {
+pub fn fork_session(
+    directory: String,
+    session_source: SessionSource,
+    session_id: String,
+) -> Result<(), String> {
     check_directory_exists(&directory)?;
-
-    #[cfg(target_os = "macos")]
-    {
-        use std::io::Write;
-        use std::os::unix::fs::PermissionsExt;
-
-        let script_content = format!(
-            "#!/bin/sh\ncd \"{}\" && opencode --session {} --fork\nrm \"$0\"\n",
-            directory, session_id
-        );
-
-        let script_path = std::env::temp_dir()
-            .join(format!("opencode_fork_{}.sh", std::process::id()));
-
-        {
-            let mut f = std::fs::File::create(&script_path)
-                .map_err(|e| format!("Failed to create temp script: {}", e))?;
-            f.write_all(script_content.as_bytes())
-                .map_err(|e| format!("Failed to write temp script: {}", e))?;
-        }
-
-        std::fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o755))
-            .map_err(|e| format!("Failed to set permissions on temp script: {}", e))?;
-
-        let script = format!(
-            "tell app \"Terminal\"\nactivate\ndo script \"bash \\\"{}\\\"\"\nend tell",
-            script_path.display()
-        );
-
-        std::process::Command::new("osascript")
-            .args(["-e", &script])
-            .spawn()
-            .map_err(|e| format!("Failed to open Terminal: {}", e))?;
-    }
-
-    #[cfg(target_os = "windows")]
-    {
-        let cmd = format!("cd /d \"{}\" && opencode --session {} --fork", directory, session_id);
-        std::process::Command::new("cmd")
-            .args(["/c", "start", "wt", "cmd", "/k", &cmd])
-            .spawn()
-            .map_err(|e| format!("Failed to open terminal: {}", e))?;
-    }
-
-    #[cfg(target_os = "linux")]
-    {
-        let cmd = format!("cd \"{}\" && opencode --session {} --fork", directory, session_id);
-        std::process::Command::new("x-terminal-emulator")
-            .args(["-e", "bash", "-c", &cmd])
-            .spawn()
-            .map_err(|e| format!("Failed to open terminal: {}", e))?;
-    }
-
-    Ok(())
+    validate_session_id(&session_id)?;
+    let args = session_command(session_source, Some(&session_id), SessionAction::Fork);
+    launch_cli_in_terminal(&directory, &args, "fork")
 }
 
 #[tauri::command]
-pub fn bootstrap_session(directory: String) -> Result<(), String> {
+pub fn bootstrap_session(directory: String, session_source: SessionSource) -> Result<(), String> {
     check_directory_exists(&directory)?;
+    let args = session_command(session_source, None, SessionAction::Start);
+    launch_cli_in_terminal(&directory, &args, "bootstrap")
+}
 
-    let script_content = format!(
-        "#!/bin/sh\ncd \"{}\" && opencode run \"hi\"\necho \"\"\necho \"--- Session created ---\"\nrm \"$0\"\n",
-        directory
-    );
-
-    #[cfg(target_os = "macos")]
-    {
-        use std::io::Write;
-        use std::os::unix::fs::PermissionsExt;
-
-        let script_path = std::env::temp_dir()
-            .join(format!("opencode_bootstrap_{}.sh", std::process::id()));
-
-        {
-            let mut f = std::fs::File::create(&script_path)
-                .map_err(|e| format!("Failed to create temp script: {}", e))?;
-            f.write_all(script_content.as_bytes())
-                .map_err(|e| format!("Failed to write temp script: {}", e))?;
-        }
-
-        std::fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o755))
-            .map_err(|e| format!("Failed to set permissions on temp script: {}", e))?;
-
-        let script = format!(
-            "tell app \"Terminal\"\nactivate\ndo script \"bash \\\"{}\\\"\"\nend tell",
-            script_path.display()
-        );
-
-        std::process::Command::new("osascript")
-            .args(["-e", &script])
-            .spawn()
-            .map_err(|e| format!("Failed to open Terminal: {}", e))?;
+fn validate_session_id(session_id: &str) -> Result<(), String> {
+    if is_valid_session_id(session_id) {
+        Ok(())
+    } else {
+        Err("INVALID_SESSION_ID".into())
     }
-
-    #[cfg(target_os = "windows")]
-    {
-        let cmd = format!("cd /d \"{}\" && opencode run \"hi\"", directory);
-        std::process::Command::new("cmd")
-            .args(["/c", "start", "wt", "cmd", "/k", &cmd])
-            .spawn()
-            .map_err(|e| format!("Failed to open terminal: {}", e))?;
-    }
-
-    #[cfg(target_os = "linux")]
-    {
-        let cmd = format!("cd \"{}\" && opencode run \"hi\"", directory);
-        std::process::Command::new("x-terminal-emulator")
-            .args(["-e", "bash", "-c", &cmd])
-            .spawn()
-            .map_err(|e| format!("Failed to open terminal: {}", e))?;
-    }
-
-    Ok(())
 }
