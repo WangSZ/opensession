@@ -8,18 +8,36 @@ function shellQuote(value: string): string {
   return `'${value.replaceAll("'", `'\"'\"'`)}'`;
 }
 
+const SOURCE_COMMANDS: Record<SessionSource, {
+  start: string;
+  resume: (id: string) => string;
+  fork: (id: string) => string;
+}> = {
+  opencode: {
+    start: "opencode",
+    resume: id => `opencode --session ${shellQuote(id)}`,
+    fork: id => `opencode --session ${shellQuote(id)} --fork`,
+  },
+  codex: {
+    start: "codex",
+    resume: id => `codex resume ${shellQuote(id)}`,
+    fork: id => `codex fork ${shellQuote(id)}`,
+  },
+  reasonix: {
+    start: "reasonix",
+    resume: id => `reasonix --resume ${shellQuote(id)}`,
+    fork: id => `reasonix --resume ${shellQuote(id)}`,
+  },
+};
+
 export function startCommand(directory: string, source: SessionSource): string {
-  return `cd ${shellQuote(directory)} && ${source === "codex" ? "codex" : "opencode"}`;
+  return `cd ${shellQuote(directory)} && ${SOURCE_COMMANDS[source].start}`;
 }
 
 export function resumeCommand(directory: string, source: SessionSource, id: string): string {
-  return source === "codex"
-    ? `cd ${shellQuote(directory)} && codex resume ${shellQuote(id)}`
-    : `cd ${shellQuote(directory)} && opencode --session ${shellQuote(id)}`;
+  return `cd ${shellQuote(directory)} && ${SOURCE_COMMANDS[source].resume(id)}`;
 }
 
 export function forkCommand(directory: string, source: SessionSource, id: string): string {
-  return source === "codex"
-    ? `cd ${shellQuote(directory)} && codex fork ${shellQuote(id)}`
-    : `cd ${shellQuote(directory)} && opencode --session ${shellQuote(id)} --fork`;
+  return `cd ${shellQuote(directory)} && ${SOURCE_COMMANDS[source].fork(id)}`;
 }

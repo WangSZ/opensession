@@ -15,10 +15,14 @@ cargo check             # Rust compile check (in src-tauri/)
 
 ```
 React 19 (src/)  ──invoke()──▶  Rust Tauri 2 (src-tauri/)
-                                   ├── db.rs           — read-only SQLite (rusqlite bundled)
+                                   ├── db.rs           — read-only OpenCode SQLite
+                                   ├── codex_db.rs     — read-only Codex SQLite
+                                   ├── reasonix_db.rs  — read-only Reasonix JSONL metadata
+                                   ├── session_repository.rs — cross-source aggregation
+                                   ├── session_sources.rs    — source identity + CLI commands
                                    ├── config.rs       — opencode DB resolution, app dirs, summaries migration
                                    ├── commands/sessions.rs  — directory/session queries
-                                   ├── commands/summary.rs   — opencode CLI summarization
+                                   ├── commands/summary.rs   — agent CLI summarization
                                    ├── commands/terminal.rs  — cross-platform terminal launcher + bootstrap
                                    └── commands/meta.rs      — tags, pin, hidden, rename, file manager
 ```
@@ -31,8 +35,10 @@ All commands registered in `lib.rs` via `generate_handler![]`.
 
 ## Database
 
-- Resolved via `opencode db path` CLI command, fallback to `$XDG_DATA_HOME/opencode/opencode.db` → `~/.local/share/opencode/opencode.db` → `dirs::data_dir()/opencode/opencode.db`
-- Opened read-only (`SQLITE_OPEN_READ_ONLY`), never writes
+- OpenCode DB is resolved via `opencode db path`, with XDG and platform fallbacks
+- Codex discovers the newest supported `state_*.sqlite` under `$CODEX_HOME` or `~/.codex`
+- Reasonix scans `$REASONIX_HOME` or `~/.reasonix` for `sessions/*.jsonl.meta`, resolving each workspace from the companion `.jsonl` transcript
+- SQLite sources are opened read-only (`SQLITE_OPEN_READ_ONLY`); Reasonix files are also only read
 - `session` table `model` column is JSON `{"id":"...","providerID":"..."}`, parsed via `serde_json`
 - `part` / `message` tables contain conversation messages and tool calls
 
@@ -49,12 +55,12 @@ All commands registered in `lib.rs` via `generate_handler![]`.
 |-------------|-----------|---------|
 | `list_directories` | — | `Vec<DirectoryGroup>` |
 | `get_sessions` | `directory: String` | `Vec<Session>` |
-| `get_session_detail` | `sessionId: String` | `SessionDetail` |
+| `get_session_detail` | `sessionSource: SessionSource`, `sessionId: String` | `SessionDetail` |
 | `search_directories` | `query: String` | `Vec<DirectoryGroup>` |
 | `generate_summary` | `directory: String` | `()` — fire-and-forget, result via event |
 | `get_cached_summary` | `directory: String` | `Option<Summary>` |
-| `open_in_terminal` | `directory: String`, `sessionId?: String` | `()` |
-| `bootstrap_session` | `directory: String` | `()` — runs `opencode run "hi"` in Terminal |
+| `open_in_terminal` | `directory: String`, `sessionSource: SessionSource`, `sessionId?: String` | `()` |
+| `bootstrap_session` | `directory: String`, `sessionSource: SessionSource` | `()` |
 | `set_directory_tags` | `path: String`, `tags: Vec<String>` | `()` |
 | `delete_tag_global` | `tag: String` | `()` |
 | `toggle_directory_pin` | `path: String` | `bool` (new state) |
@@ -64,10 +70,10 @@ All commands registered in `lib.rs` via `generate_handler![]`.
 
 ## Platform Details
 
-- macOS: writes temp shell script → `osascript` → Terminal.app (`temp_dir()/opencode_launch_{PID}.sh`, self-deletes with `rm "$0"`). Same pattern for `bootstrap_session`.
-- Windows: `cmd /c start wt cmd /k "cd /d ... && opencode ..."`
-- Linux: `x-terminal-emulator -e bash -c "cd ... && opencode ..."`
-- `opencode` CLI must be on `PATH` (summarization and terminal launch both depend on it)
+- macOS: writes a temp shell script → `osascript` → Terminal.app, then the script self-deletes
+- Windows: `cmd /c start wt cmd /k "cd /d ... && <agent> ..."`
+- Linux: `x-terminal-emulator -e bash -c "cd ... && <agent> ..."`
+- The selected `opencode`, `codex`, or `reasonix` CLI must be on `PATH`
 - Clipboard: `navigator.clipboard.writeText()` with `textarea` fallback — no Tauri plugin needed
 
 ## Tauri Events
@@ -94,14 +100,14 @@ All commands registered in `lib.rs` via `generate_handler![]`.
 
 | Location | Content | Button |
 |----------|---------|--------|
-| SessionPanel header | `cd "/path" && opencode` | copy icon |
-| SessionCard | `cd "/path" && opencode --session <id>` | copy icon |
-| SessionDetail | `cd "/path" && opencode --session <id>` | Copy button with text |
+| SessionPanel header | `cd "/path" && <agent>` | copy icon |
+| SessionCard | Source-specific resume command | copy icon |
+| SessionDetail | Source-specific resume command | Copy button with text |
 
 ## Key UX Flows
 
 - **Missing directory**: when user tries to open a deleted/moved directory, shows dialog → hide or relocate (relocate calls `rename_directory_meta` + `bootstrap_session`)
-- **Bootstrap**: `bootstrap_session` opens a new Terminal, runs `opencode run "hi"` in the target directory, then self-deletes
+- **Bootstrap**: `bootstrap_session` opens the selected agent in a new Terminal in the target directory
 
 ## Style & Conventions
 

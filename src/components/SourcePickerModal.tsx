@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type { SessionSource } from "../types";
+import { SESSION_SOURCES, sourceLabel } from "../utils/sessionSource";
 
 interface Props {
   title: string;
@@ -38,8 +39,8 @@ export default function SourcePickerModal({
         <h3 className="text-sm font-medium text-gray-200 mb-2">{title}</h3>
         <p className="text-xs text-gray-500 font-mono truncate mb-4" title={directory}>{directory}</p>
 
-        <div className="grid grid-cols-2 bg-surface-hover border border-surface-border rounded-md p-0.5">
-          {(["opencode", "codex"] as SessionSource[]).map(value => (
+        <div className="grid grid-cols-3 bg-surface-hover border border-surface-border rounded-md p-0.5">
+          {SESSION_SOURCES.map(value => (
             <button
               key={value}
               type="button"
@@ -50,7 +51,7 @@ export default function SourcePickerModal({
                   : "text-gray-500 hover:text-gray-300"
               }`}
             >
-              {value === "codex" ? "Codex" : "OpenCode"}
+              {sourceLabel(value)}
             </button>
           ))}
         </div>

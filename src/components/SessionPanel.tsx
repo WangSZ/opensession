@@ -4,6 +4,7 @@ import { MessageSquare, Loader2, Search, Eye, EyeOff } from "lucide-react";
 import SessionCard from "./SessionCard";
 import type { Session, SessionSource, Issue } from "../types";
 import { sessionKey } from "../utils/sessionCommand";
+import { SESSION_SOURCES, sourceLabel, sourceStartButtonClass } from "../utils/sessionSource";
 
 interface Props {
   directory: string | null;
@@ -25,10 +26,9 @@ export default function SessionPanel({ directory, sessions, loading, onStart, on
   const [sourceFilter, setSourceFilter] = useState<"all" | SessionSource>("all");
   const parentRef = useRef<HTMLDivElement>(null);
 
-  const sourceCounts = useMemo(() => ({
-    opencode: sessions.filter(session => session.source === "opencode").length,
-    codex: sessions.filter(session => session.source === "codex").length,
-  }), [sessions]);
+  const sourceCounts = useMemo(() => Object.fromEntries(
+    SESSION_SOURCES.map(source => [source, sessions.filter(session => session.source === source).length]),
+  ) as Record<SessionSource, number>, [sessions]);
 
   useEffect(() => {
     if (sourceFilter !== "all" && sourceCounts[sourceFilter] === 0) {
@@ -62,6 +62,10 @@ export default function SessionPanel({ directory, sessions, loading, onStart, on
     estimateSize: () => 120,
     overscan: 10,
   });
+  const sourceFilters: Array<["all" | SessionSource, string, number]> = [
+    ["all", "全部", sessions.length],
+    ...SESSION_SOURCES.map(source => [source, sourceLabel(source), sourceCounts[source]] as [SessionSource, string, number]),
+  ];
 
   if (!directory) {
     return (
@@ -80,21 +84,21 @@ export default function SessionPanel({ directory, sessions, loading, onStart, on
         <code className="text-xs text-gray-300 font-mono truncate flex-1 min-w-0">
           {directory}
         </code>
-        <button onClick={() => onStart("opencode")} className="px-2 py-1 text-xs rounded bg-indigo-500/15 text-indigo-300 hover:bg-indigo-500/25" title="Open OpenCode">
-          OpenCode
-        </button>
-        <button onClick={() => onStart("codex")} className="px-2 py-1 text-xs rounded bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25" title="Open Codex">
-          Codex
-        </button>
+        {SESSION_SOURCES.map(source => (
+          <button
+            key={source}
+            onClick={() => onStart(source)}
+            className={`px-2 py-1 text-xs rounded ${sourceStartButtonClass(source)}`}
+            title={`Open ${sourceLabel(source)}`}
+          >
+            {sourceLabel(source)}
+          </button>
+        ))}
       </div>
 
       <div className="px-5 py-2 border-b border-surface-border flex items-center gap-2">
         <div className="flex items-center bg-surface-hover border border-surface-border rounded-md p-0.5 flex-shrink-0">
-          {([
-            ["all", "全部", sessions.length],
-            ["opencode", "OpenCode", sourceCounts.opencode],
-            ["codex", "Codex", sourceCounts.codex],
-          ] as const).map(([value, label, count]) => (
+          {sourceFilters.map(([value, label, count]) => (
             <button
               key={value}
               onClick={() => setSourceFilter(value)}

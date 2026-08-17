@@ -2,6 +2,7 @@ import { X, MessageSquare, DollarSign, Cpu, User, Hash, FileCode } from "lucide-
 import CopyButton from "./CopyButton";
 import type { SessionDetail as SessionDetailType } from "../types";
 import { resumeCommand } from "../utils/sessionCommand";
+import { sourceLabel } from "../utils/sessionSource";
 
 interface Props {
   detail: SessionDetailType;
@@ -40,7 +41,7 @@ export default function SessionDetail({ detail, directory, onClose }: Props) {
           </div>
 
           <div className="grid grid-cols-2 gap-3">
-            <Stat icon={Cpu} label="Source" value={s.source === "codex" ? "Codex" : "OpenCode"} />
+            <Stat icon={Cpu} label="Source" value={sourceLabel(s.source)} />
             <Stat icon={Cpu} label="Agent" value={s.agent} />
             {s.model_name && <Stat icon={Hash} label="Model" value={s.model_name} />}
             {s.cost != null && <Stat icon={DollarSign} label="Cost" value={`$${s.cost.toFixed(4)}`} />}

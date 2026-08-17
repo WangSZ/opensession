@@ -4,10 +4,35 @@ use crate::models::*;
 use serde_json::json;
 use tauri::Emitter;
 
+async fn cli_available(program: &str) -> bool {
+    tokio::process::Command::new(program)
+        .arg("--version")
+        .output()
+        .await
+        .map(|output| output.status.success())
+        .unwrap_or(false)
+}
+
+fn select_summary_engine(
+    opencode_available: bool,
+    codex_available: bool,
+    reasonix_available: bool,
+) -> Option<&'static str> {
+    if opencode_available {
+        Some("opencode")
+    } else if codex_available {
+        Some("codex")
+    } else if reasonix_available {
+        Some("reasonix")
+    } else {
+        None
+    }
+}
+
 #[tauri::command]
 pub async fn generate_summary(app: tauri::AppHandle, directory: String) -> Result<(), String> {
     let directory = crate::session_repository::normalize_directory_path(&directory);
-    let temp_dir = std::env::temp_dir().join("opensession-opencode");
+    let temp_dir = std::env::temp_dir().join("opensession-summary");
     std::fs::create_dir_all(&temp_dir).map_err(|e| format!("Failed to create temp dir: {}", e))?;
 
     let agents_md_path = std::path::Path::new(&directory).join("AGENTS.md");
@@ -37,29 +62,39 @@ pub async fn generate_summary(app: tauri::AppHandle, directory: String) -> Resul
     );
 
     tauri::async_runtime::spawn(async move {
-        let opencode_available = tokio::process::Command::new("opencode")
-            .arg("--version")
-            .output()
-            .await
-            .map(|output| output.status.success())
-            .unwrap_or(false);
+        let (opencode_available, codex_available, reasonix_available) = tokio::join!(
+            cli_available("opencode"),
+            cli_available("codex"),
+            cli_available("reasonix"),
+        );
 
-        let (engine, output) = if opencode_available {
-            let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
-            let escaped_dir = directory.replace('\'', "'\\''");
-            let escaped_prompt = prompt.replace('\'', "'\\''");
-            let shell_cmd = format!("opencode run --dir '{}' '{}'", escaped_dir, escaped_prompt);
-            (
-                "opencode",
+        let Some(engine) =
+            select_summary_engine(opencode_available, codex_available, reasonix_available)
+        else {
+            let _ = app.emit(
+                "summary://generated",
+                json!({
+                    "directory": directory,
+                    "error": "No supported agent CLI found (opencode, codex, or reasonix)"
+                }),
+            );
+            return;
+        };
+
+        let output = match engine {
+            "opencode" => {
+                let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
+                let escaped_dir = directory.replace('\'', "'\\''");
+                let escaped_prompt = prompt.replace('\'', "'\\''");
+                let shell_cmd =
+                    format!("opencode run --dir '{}' '{}'", escaped_dir, escaped_prompt);
                 tokio::process::Command::new(&shell)
                     .args(["-lc", &shell_cmd])
                     .current_dir(&temp_dir)
                     .output()
-                    .await,
-            )
-        } else {
-            (
-                "codex",
+                    .await
+            }
+            "codex" => {
                 tokio::process::Command::new("codex")
                     .args([
                         "exec",
@@ -73,8 +108,16 @@ pub async fn generate_summary(app: tauri::AppHandle, directory: String) -> Resul
                     ])
                     .current_dir(&temp_dir)
                     .output()
-                    .await,
-            )
+                    .await
+            }
+            "reasonix" => {
+                tokio::process::Command::new("reasonix")
+                    .args(["--print", "--output-format", "text", &prompt])
+                    .current_dir(&temp_dir)
+                    .output()
+                    .await
+            }
+            _ => unreachable!(),
         };
 
         match output {
@@ -194,4 +237,17 @@ pub fn get_cached_summary(directory: String) -> Result<Option<Summary>, String> 
         })?;
     let summaries = crate::session_repository::normalize_summary_keys(summaries);
     Ok(summaries.get(&directory).cloned())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn summary_engine_falls_back_to_reasonix() {
+        assert_eq!(select_summary_engine(false, false, true), Some("reasonix"));
+        assert_eq!(select_summary_engine(false, true, true), Some("codex"));
+        assert_eq!(select_summary_engine(true, true, true), Some("opencode"));
+        assert_eq!(select_summary_engine(false, false, false), None);
+    }
 }

@@ -10,7 +10,10 @@ fn session_meta_path() -> std::path::PathBuf {
 fn normalize_session_meta_keys(meta: HashMap<String, SessionMeta>) -> HashMap<String, SessionMeta> {
     meta.into_iter()
         .map(|(key, value)| {
-            if key.starts_with("opencode:") || key.starts_with("codex:") {
+            if key.starts_with("opencode:")
+                || key.starts_with("codex:")
+                || key.starts_with("reasonix:")
+            {
                 (key, value)
             } else {
                 (format!("opencode:{}", key), value)
@@ -112,11 +115,13 @@ mod tests {
             },
         );
         meta.insert("codex:019f".to_string(), SessionMeta::default());
+        meta.insert("reasonix:20260817".to_string(), SessionMeta::default());
 
         let migrated = normalize_session_meta_keys(meta);
 
         assert_eq!(migrated["opencode:legacy-id"].note, "keep me");
         assert!(migrated.contains_key("codex:019f"));
+        assert!(migrated.contains_key("reasonix:20260817"));
         assert!(!migrated.contains_key("legacy-id"));
     }
 }

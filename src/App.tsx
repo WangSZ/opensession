@@ -23,6 +23,7 @@ import { Database, Terminal, SquareTerminal, FolderOpen, Pin, Tag, EyeOff, Spark
 import type { DirectoryGroup, Session, SessionSource, SessionDetail as SessionDetailType, SourceStatuses, Summary, Issue, IssueWithSessions } from "./types";
 import { enableModernWindowStyle } from "@cloudworxx/tauri-plugin-mac-rounded-corners";
 import { resumeCommand, sessionKey } from "./utils/sessionCommand";
+import { isSessionSource, SESSION_SOURCES, sourceLabel } from "./utils/sessionSource";
 
 const isMac = navigator.platform.toLowerCase().includes("mac");
 type SidebarView = "dirs" | "issues";
@@ -32,10 +33,10 @@ type PendingSourceAction =
 
 function sourceStatusWarning(statuses: SourceStatuses): string | null {
   const warnings: string[] = [];
-  if (statuses.opencode === "unsupported_schema") warnings.push("OpenCode data schema is unsupported");
-  if (statuses.codex === "unsupported_schema") warnings.push("Codex data schema is unsupported");
-  if (statuses.opencode === "read_error") warnings.push("OpenCode data could not be read");
-  if (statuses.codex === "read_error") warnings.push("Codex data could not be read");
+  for (const source of SESSION_SOURCES) {
+    if (statuses[source] === "unsupported_schema") warnings.push(`${sourceLabel(source)} data schema is unsupported`);
+    if (statuses[source] === "read_error") warnings.push(`${sourceLabel(source)} data could not be read`);
+  }
   return warnings.length > 0 ? warnings.join("; ") : null;
 }
 
@@ -51,9 +52,10 @@ function App() {
   } = useCommands(loadDirectories);
 
   const [directories, setDirectories] = useState<DirectoryGroup[]>([]);
-  const [lastSessionSource, setLastSessionSource] = useState<SessionSource>(() =>
-    localStorage.getItem("opensession:last-source") === "codex" ? "codex" : "opencode"
-  );
+  const [lastSessionSource, setLastSessionSource] = useState<SessionSource>(() => {
+    const stored = localStorage.getItem("opensession:last-source");
+    return isSessionSource(stored) ? stored : "opencode";
+  });
   const [selectedDir, setSelectedDir] = useState<string | null>(null);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
@@ -792,18 +794,12 @@ function App() {
         icon: <Braces size={14} />,
         onClick: () => openInJetBrains(dirPath).catch(e => setError(String(e))),
       },
-      {
+      ...SESSION_SOURCES.map(source => ({
         type: "item" as const,
-        label: "打开 OpenCode",
+        label: `打开 ${sourceLabel(source)}`,
         icon: <Terminal size={14} />,
-        onClick: () => handleOpenInTerminal(dirPath, "opencode"),
-      },
-      {
-        type: "item" as const,
-        label: "打开 Codex",
-        icon: <Terminal size={14} />,
-        onClick: () => handleOpenInTerminal(dirPath, "codex"),
-      },
+        onClick: () => handleOpenInTerminal(dirPath, source),
+      })),
       {
         type: "item" as const,
         label: "打开终端",
@@ -928,11 +924,11 @@ function App() {
             <Database className="w-16 h-16 mx-auto mb-4 text-gray-600" />
             <h2 className="text-xl font-semibold text-gray-300 mb-2">No session data found</h2>
             <p className="text-gray-500 leading-relaxed mb-6">
-              Install OpenCode or Codex and start at least one interactive session in a project directory.
+              Install OpenCode, Codex, or Reasonix and start at least one interactive session in a project directory.
             </p>
             <p className="text-gray-600 text-sm flex items-center justify-center gap-2">
               <Terminal className="w-4 h-4" />
-              Run <code className="text-gray-400 bg-surface-card px-1.5 py-0.5 rounded">opencode</code> or <code className="text-gray-400 bg-surface-card px-1.5 py-0.5 rounded">codex</code> to get started
+              Run <code className="text-gray-400 bg-surface-card px-1.5 py-0.5 rounded">opencode</code>, <code className="text-gray-400 bg-surface-card px-1.5 py-0.5 rounded">codex</code>, or <code className="text-gray-400 bg-surface-card px-1.5 py-0.5 rounded">reasonix</code> to get started
             </p>
           </div>
         </div>

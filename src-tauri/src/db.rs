@@ -177,6 +177,7 @@ pub fn list_directory_groups() -> Result<Vec<DirectoryGroup>, String> {
                 source_counts: SourceCounts {
                     opencode: cnt,
                     codex: 0,
+                    reasonix: 0,
                 },
             }
         })

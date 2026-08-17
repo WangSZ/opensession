@@ -6,6 +6,7 @@ use crate::session_sources::SessionSource;
 pub struct SourceCounts {
     pub opencode: i64,
     pub codex: i64,
+    pub reasonix: i64,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -22,6 +23,7 @@ pub enum SourceStatus {
 pub struct SourceStatuses {
     pub opencode: SourceStatus,
     pub codex: SourceStatus,
+    pub reasonix: SourceStatus,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

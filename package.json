@@ -2,7 +2,7 @@
   "name": "opensession",
   "private": true,
   "version": "0.1.0",
-  "description": "Visual session manager for OpenCode and Codex coding sessions",
+  "description": "Visual session manager for OpenCode, Codex, and Reasonix coding sessions",
   "license": "MIT",
   "author": "OpenSession Contributors",
   "repository": {

@@ -3,6 +3,7 @@ import { Play, Info, FileCode, EyeOff, Bug, Pencil } from "lucide-react";
 import CopyButton from "./CopyButton";
 import type { Session, Issue } from "../types";
 import { resumeCommand } from "../utils/sessionCommand";
+import { sourceBadgeClass, sourceLabel } from "../utils/sessionSource";
 
 interface Props {
   session: Session;
@@ -60,12 +61,8 @@ export default function SessionCard({ session, directory, onResume, onDetail, on
     >
       <div className="flex items-start justify-between mb-1.5">
         <div className="flex items-center gap-2 flex-1 min-w-0 mr-2">
-          <span className={`text-[10px] leading-5 px-1.5 rounded font-medium flex-shrink-0 ${
-            session.source === "codex"
-              ? "bg-emerald-500/15 text-emerald-300"
-              : "bg-indigo-500/15 text-indigo-300"
-          }`}>
-            {session.source === "codex" ? "Codex" : "OpenCode"}
+          <span className={`text-[10px] leading-5 px-1.5 rounded font-medium flex-shrink-0 ${sourceBadgeClass(session.source)}`}>
+            {sourceLabel(session.source)}
           </span>
           <h3 className="font-medium text-sm truncate min-w-0">
             {session.title || session.slug || session.first_message}

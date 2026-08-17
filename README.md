@@ -1,19 +1,19 @@
 # OpenSession
 
-Visual session manager for [OpenCode](https://opencode.ai) and [Codex](https://developers.openai.com/codex/) — browse, search, filter, resume, and fork AI coding sessions with a native desktop UI.
+Visual session manager for [OpenCode](https://opencode.ai), [Codex](https://developers.openai.com/codex/), and Reasonix — browse, search, filter, resume, and fork AI coding sessions with a native desktop UI.
 
 ![OpenSession screenshot](screenshot.png)
 
 ## Features
 
-- **Unified directory browser** — merge OpenCode and Codex sessions under one project directory
-- **Session explorer** — virtual-scrolled list with All/OpenCode/Codex source filters
+- **Unified directory browser** — merge OpenCode, Codex, and Reasonix sessions under one project directory
+- **Session explorer** — virtual-scrolled list with All/OpenCode/Codex/Reasonix source filters
 - **One-click resume and fork** — launch the owning CLI with the correct session command
-- **Command copy** — copy source-aware OpenCode or Codex resume commands
+- **Command copy** — copy source-aware resume commands for all three agents
 - **Session detail** — full detail drawer showing model, timestamps, and command
 - **Right-click actions** — open in Finder/Terminal, pin, hide, tag, rename
-- **Smart summaries** — generated via OpenCode, with an ephemeral read-only Codex fallback
-- **Quick start** — open OpenCode or Codex in any directory
+- **Smart summaries** — generated via OpenCode, with Codex and Reasonix fallbacks
+- **Quick start** — open OpenCode, Codex, or Reasonix in any directory
 - **Search & filter** — search directories by name, filter by tags
 - **Dark theme** — native-looking dark UI
 
@@ -21,7 +21,7 @@ Visual session manager for [OpenCode](https://opencode.ai) and [Codex](https://d
 
 - [Node.js](https://nodejs.org/) (v18+)
 - [Rust](https://www.rust-lang.org/) (edition 2021)
-- [OpenCode CLI](https://opencode.ai), [Codex CLI](https://developers.openai.com/codex/cli/), or both on `PATH`
+- [OpenCode CLI](https://opencode.ai), [Codex CLI](https://developers.openai.com/codex/cli/), Reasonix CLI, or any combination on `PATH`
 
 ## Getting Started
 
@@ -46,7 +46,7 @@ Output: `src-tauri/target/release/bundle/macos/OpenSession.app` (~13 MB standalo
 |-------|-----------|
 | Frontend | React 19, TypeScript, Tailwind CSS, Vite 6 |
 | Desktop | Tauri 2 (Rust) |
-| Database | SQLite (read-only via rusqlite, bundled) |
+| Session storage | SQLite and Reasonix JSONL metadata (read-only) |
 | Virtualization | @tanstack/react-virtual |
 | Icons | lucide-react |
 
@@ -67,6 +67,7 @@ src-tauri/              Rust backend
 │   ├── lib.rs          Plugin registration, command handlers
 │   ├── db.rs           Read-only OpenCode SQLite queries
 │   ├── codex_db.rs     Read-only Codex SQLite discovery and queries
+│   ├── reasonix_db.rs  Read-only Reasonix JSONL metadata discovery
 │   ├── session_repository.rs  Cross-source aggregation
 │   ├── session_sources.rs     Source identity and CLI command construction
 │   ├── config.rs       DB path resolution, XDG dirs, migration

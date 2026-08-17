@@ -31,19 +31,17 @@ pub fn normalize_summary_keys(
         .collect()
 }
 
-pub fn merge_directory_groups(
-    opencode: Vec<DirectoryGroup>,
-    codex: Vec<DirectoryGroup>,
-) -> Vec<DirectoryGroup> {
+pub fn merge_directory_groups(sources: Vec<Vec<DirectoryGroup>>) -> Vec<DirectoryGroup> {
     let mut groups = HashMap::<String, DirectoryGroup>::new();
 
-    for mut group in opencode.into_iter().chain(codex) {
+    for mut group in sources.into_iter().flatten() {
         let normalized_path = normalize_directory_path(&group.path);
         group.path = normalized_path.clone();
         if let Some(existing) = groups.get_mut(&normalized_path) {
             existing.session_count += group.session_count;
             existing.source_counts.opencode += group.source_counts.opencode;
             existing.source_counts.codex += group.source_counts.codex;
+            existing.source_counts.reasonix += group.source_counts.reasonix;
             existing.total_cost += group.total_cost;
             if group.last_active_epoch > existing.last_active_epoch {
                 existing.last_active_epoch = group.last_active_epoch;
@@ -59,14 +57,28 @@ pub fn merge_directory_groups(
     result
 }
 
-pub fn merge_sessions(opencode: Vec<Session>, codex: Vec<Session>) -> Vec<Session> {
-    let mut sessions: Vec<_> = opencode.into_iter().chain(codex).collect();
+pub fn merge_sessions(sources: Vec<Vec<Session>>) -> Vec<Session> {
+    let mut sessions: Vec<_> = sources.into_iter().flatten().collect();
     sessions.sort_by(|a, b| b.time_updated.cmp(&a.time_updated));
     sessions
 }
 
-fn combined_error(opencode: String, codex: String) -> String {
-    format!("NO_SESSION_DATA: opencode={}; codex={}", opencode, codex)
+fn collect_available<T>(
+    results: Vec<(&'static str, Result<Vec<T>, String>)>,
+) -> Result<Vec<Vec<T>>, String> {
+    let mut available = Vec::new();
+    let mut errors = Vec::new();
+    for (source, result) in results {
+        match result {
+            Ok(items) => available.push(items),
+            Err(error) => errors.push(format!("{}={}", source, error)),
+        }
+    }
+    if available.is_empty() {
+        Err(format!("NO_SESSION_DATA: {}", errors.join("; ")))
+    } else {
+        Ok(available)
+    }
 }
 
 pub fn status_from_directory_result(result: Result<Vec<DirectoryGroup>, String>) -> SourceStatus {
@@ -83,19 +95,16 @@ pub fn get_source_statuses() -> SourceStatuses {
     SourceStatuses {
         opencode: status_from_directory_result(crate::db::list_directory_groups()),
         codex: status_from_directory_result(crate::codex_db::list_directory_groups()),
+        reasonix: status_from_directory_result(crate::reasonix_db::list_directory_groups()),
     }
 }
 
 pub fn list_directory_groups() -> Result<Vec<DirectoryGroup>, String> {
-    let mut groups = match (
-        crate::db::list_directory_groups(),
-        crate::codex_db::list_directory_groups(),
-    ) {
-        (Ok(opencode), Ok(codex)) => merge_directory_groups(opencode, codex),
-        (Ok(opencode), Err(_)) => opencode,
-        (Err(_), Ok(codex)) => codex,
-        (Err(opencode), Err(codex)) => return Err(combined_error(opencode, codex)),
-    };
+    let mut groups = merge_directory_groups(collect_available(vec![
+        ("opencode", crate::db::list_directory_groups()),
+        ("codex", crate::codex_db::list_directory_groups()),
+        ("reasonix", crate::reasonix_db::list_directory_groups()),
+    ])?);
 
     let cache_path = crate::config::app_data_dir().join("summaries.json");
     let summaries: HashMap<String, crate::models::Summary> = std::fs::read_to_string(cache_path)
@@ -111,39 +120,46 @@ pub fn list_directory_groups() -> Result<Vec<DirectoryGroup>, String> {
     Ok(groups)
 }
 
+fn get_source_sessions(
+    target: &str,
+    list_groups: fn() -> Result<Vec<DirectoryGroup>, String>,
+    get_sessions: fn(&str) -> Result<Vec<Session>, String>,
+) -> Result<Vec<Session>, String> {
+    let paths: Vec<_> = list_groups()?
+        .into_iter()
+        .filter(|group| normalize_directory_path(&group.path) == target)
+        .map(|group| group.path)
+        .collect();
+    let mut sessions = Vec::new();
+    for path in paths {
+        sessions.extend(get_sessions(&path)?);
+    }
+    Ok(sessions)
+}
+
 pub fn get_sessions(directory: &str) -> Result<Vec<Session>, String> {
     let target = normalize_directory_path(directory);
-    let opencode = crate::db::list_directory_groups().and_then(|groups| {
-        let paths: Vec<_> = groups
-            .into_iter()
-            .filter(|group| normalize_directory_path(&group.path) == target)
-            .map(|group| group.path)
-            .collect();
-        let mut sessions = Vec::new();
-        for path in paths {
-            sessions.extend(crate::db::get_sessions(&path)?);
-        }
-        Ok(sessions)
-    });
-    let codex = crate::codex_db::list_directory_groups().and_then(|groups| {
-        let paths: Vec<_> = groups
-            .into_iter()
-            .filter(|group| normalize_directory_path(&group.path) == target)
-            .map(|group| group.path)
-            .collect();
-        let mut sessions = Vec::new();
-        for path in paths {
-            sessions.extend(crate::codex_db::get_sessions(&path)?);
-        }
-        Ok(sessions)
-    });
+    let opencode = get_source_sessions(
+        &target,
+        crate::db::list_directory_groups,
+        crate::db::get_sessions,
+    );
+    let codex = get_source_sessions(
+        &target,
+        crate::codex_db::list_directory_groups,
+        crate::codex_db::get_sessions,
+    );
+    let reasonix = get_source_sessions(
+        &target,
+        crate::reasonix_db::list_directory_groups,
+        crate::reasonix_db::get_sessions,
+    );
 
-    let mut sessions = match (opencode, codex) {
-        (Ok(opencode), Ok(codex)) => Ok(merge_sessions(opencode, codex)),
-        (Ok(opencode), Err(_)) => Ok(opencode),
-        (Err(_), Ok(codex)) => Ok(codex),
-        (Err(opencode), Err(codex)) => Err(combined_error(opencode, codex)),
-    }?;
+    let mut sessions = merge_sessions(collect_available(vec![
+        ("opencode", opencode),
+        ("codex", codex),
+        ("reasonix", reasonix),
+    ])?);
     for session in &mut sessions {
         session.directory = target.clone();
     }
@@ -157,6 +173,7 @@ pub fn get_session_detail(
     match source {
         SessionSource::OpenCode => crate::db::get_session_detail(session_id),
         SessionSource::Codex => crate::codex_db::get_session_detail(session_id),
+        SessionSource::Reasonix => crate::reasonix_db::get_session_detail(session_id),
     }
 }
 
@@ -215,6 +232,7 @@ mod tests {
             SourceCounts {
                 opencode: 2,
                 codex: 0,
+                reasonix: 0,
             },
         );
         let codex = group(
@@ -225,16 +243,29 @@ mod tests {
             SourceCounts {
                 opencode: 0,
                 codex: 3,
+                reasonix: 0,
+            },
+        );
+        let reasonix = group(
+            "/repo",
+            1,
+            3_000,
+            0.0,
+            SourceCounts {
+                opencode: 0,
+                codex: 0,
+                reasonix: 1,
             },
         );
 
-        let merged = merge_directory_groups(vec![opencode], vec![codex]);
+        let merged = merge_directory_groups(vec![vec![opencode], vec![codex], vec![reasonix]]);
 
         assert_eq!(merged.len(), 1);
-        assert_eq!(merged[0].session_count, 5);
+        assert_eq!(merged[0].session_count, 6);
         assert_eq!(merged[0].source_counts.opencode, 2);
         assert_eq!(merged[0].source_counts.codex, 3);
-        assert_eq!(merged[0].last_active_epoch, 2_000);
+        assert_eq!(merged[0].source_counts.reasonix, 1);
+        assert_eq!(merged[0].last_active_epoch, 3_000);
         assert_eq!(merged[0].total_cost, 1.25);
     }
 
@@ -263,14 +294,14 @@ mod tests {
             note: String::new(),
         };
 
-        let merged = merge_sessions(
+        let merged = merge_sessions(vec![
             vec![session(
                 SessionSource::OpenCode,
                 "old",
                 "2026-01-01T00:00:00Z",
             )],
             vec![session(SessionSource::Codex, "new", "2026-02-01T00:00:00Z")],
-        );
+        ]);
 
         assert_eq!(merged[0].id, "new");
         assert_eq!(merged[0].source, SessionSource::Codex);
@@ -284,7 +315,7 @@ mod tests {
         std::fs::create_dir_all(&repo).unwrap();
         let alternate = repo.join(".").to_string_lossy().to_string();
 
-        let merged = merge_directory_groups(
+        let merged = merge_directory_groups(vec![
             vec![group(
                 repo.to_str().unwrap(),
                 1,
@@ -293,6 +324,7 @@ mod tests {
                 SourceCounts {
                     opencode: 1,
                     codex: 0,
+                    reasonix: 0,
                 },
             )],
             vec![group(
@@ -303,9 +335,10 @@ mod tests {
                 SourceCounts {
                     opencode: 0,
                     codex: 1,
+                    reasonix: 0,
                 },
             )],
-        );
+        ]);
 
         assert_eq!(merged.len(), 1);
         assert_eq!(merged[0].session_count, 2);
@@ -334,7 +367,8 @@ mod tests {
                 0.0,
                 SourceCounts {
                     opencode: 1,
-                    codex: 0
+                    codex: 0,
+                    reasonix: 0,
                 },
             )])),
             SourceStatus::Available

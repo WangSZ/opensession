@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { SessionSource } from "../types";
+import { SESSION_SOURCES, sourceLabel } from "../utils/sessionSource";
 
 interface Props {
   directory: string;
@@ -92,8 +93,8 @@ export default function WorktreeModal({ directory, defaultName, initialSource, o
         )}
 
         <label className="text-xs text-gray-400 mb-1 block">启动方式</label>
-        <div className="grid grid-cols-2 bg-surface-hover border border-surface-border rounded-md p-0.5 mb-4">
-          {(["opencode", "codex"] as SessionSource[]).map(value => (
+        <div className="grid grid-cols-3 bg-surface-hover border border-surface-border rounded-md p-0.5 mb-4">
+          {SESSION_SOURCES.map(value => (
             <button
               key={value}
               type="button"
@@ -104,7 +105,7 @@ export default function WorktreeModal({ directory, defaultName, initialSource, o
                   : "text-gray-500 hover:text-gray-300"
               }`}
             >
-              {value === "codex" ? "Codex" : "OpenCode"}
+              {sourceLabel(value)}
             </button>
           ))}
         </div>

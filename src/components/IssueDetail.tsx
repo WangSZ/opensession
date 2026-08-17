@@ -1,10 +1,11 @@
 import { useState, useMemo, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { Bug, Terminal, SquareTerminal, Play, FolderOpen, Trash2, Pencil, Send, Clock, AlertTriangle, X, MessageSquare, GitFork, Check, Loader2, Unlink } from "lucide-react";
+import { Bug, Terminal, Play, FolderOpen, Trash2, Pencil, Send, Clock, AlertTriangle, X, MessageSquare, GitFork, Check, Loader2, Unlink } from "lucide-react";
 import type { IssueWithSessions, IssueComment, Session, SessionSource } from "../types";
 import ContextMenu from "./ContextMenu";
 import type { MenuItem } from "./ContextMenu";
 import { sessionKey } from "../utils/sessionCommand";
+import { SESSION_SOURCES, sourceLabel } from "../utils/sessionSource";
 
 interface Props {
   issue: IssueWithSessions;
@@ -227,16 +228,16 @@ export default function IssueDetail({ issue, onEdit, onDelete, onOpenSession, on
                           >
                             <FolderOpen size={11} />
                           </button>
-                          <button onClick={e => { e.stopPropagation(); onOpenInTerminal(d.directory, "opencode"); }}
-                            className="text-gray-400 hover:text-white transition-colors p-0.5" title="打开 OpenCode"
-                          >
-                            <Terminal size={11} />
-                          </button>
-                          <button onClick={e => { e.stopPropagation(); onOpenInTerminal(d.directory, "codex"); }}
-                            className="text-gray-400 hover:text-white transition-colors p-0.5" title="打开 Codex"
-                          >
-                            <SquareTerminal size={11} />
-                          </button>
+                          {SESSION_SOURCES.map(source => (
+                            <button
+                              key={source}
+                              onClick={e => { e.stopPropagation(); onOpenInTerminal(d.directory, source); }}
+                              className="text-gray-400 hover:text-white transition-colors p-0.5"
+                              title={`打开 ${sourceLabel(source)}`}
+                            >
+                              <Terminal size={11} />
+                            </button>
+                          ))}
                           <button onClick={e => { e.stopPropagation(); onUnlinkDirectory(d.directory); }}
                             className="text-gray-400 hover:text-red-400 transition-colors p-0.5" title="取消关联目录"
                           >
@@ -289,7 +290,7 @@ export default function IssueDetail({ issue, onEdit, onDelete, onOpenSession, on
                   </button>
                   <button onClick={() => onOpenInTerminal(dir, sessions[0].session_source)}
                     className="text-gray-500 hover:text-gray-200 transition-colors p-0.5"
-                    title={`打开 ${sessions[0].session_source === "codex" ? "Codex" : "OpenCode"}`}
+                    title={`打开 ${sourceLabel(sessions[0].session_source)}`}
                   >
                     <Terminal size={11} />
                   </button>
@@ -322,7 +323,7 @@ export default function IssueDetail({ issue, onEdit, onDelete, onOpenSession, on
                         </button>
                         <button onClick={e => { e.stopPropagation(); onOpenInTerminal(s.directory, s.session_source, s.session_id); }}
                           className="text-gray-400 hover:text-white transition-colors p-0.5"
-                          title={`打开 ${s.session_source === "codex" ? "Codex" : "OpenCode"}`}
+                          title={`打开 ${sourceLabel(s.session_source)}`}
                         >
                           <Terminal size={11} />
                         </button>

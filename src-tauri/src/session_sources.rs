@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 pub enum SessionSource {
     OpenCode,
     Codex,
+    Reasonix,
 }
 
 impl Default for SessionSource {
@@ -18,6 +19,7 @@ impl SessionSource {
         match self {
             Self::OpenCode => "opencode",
             Self::Codex => "codex",
+            Self::Reasonix => "reasonix",
         }
     }
 }
@@ -57,6 +59,7 @@ pub fn session_command(
     match (source, action) {
         (SessionSource::OpenCode, SessionAction::Start) => vec!["opencode".into()],
         (SessionSource::Codex, SessionAction::Start) => vec!["codex".into()],
+        (SessionSource::Reasonix, SessionAction::Start) => vec!["reasonix".into()],
         (SessionSource::OpenCode, SessionAction::Resume) => {
             vec!["opencode".into(), "--session".into(), id.into()]
         }
@@ -71,6 +74,9 @@ pub fn session_command(
         }
         (SessionSource::Codex, SessionAction::Fork) => {
             vec!["codex".into(), "fork".into(), id.into()]
+        }
+        (SessionSource::Reasonix, SessionAction::Resume | SessionAction::Fork) => {
+            vec!["reasonix".into(), "--resume".into(), id.into()]
         }
     }
 }
@@ -115,8 +121,10 @@ mod tests {
     #[test]
     fn session_ref_uses_source_scoped_storage_key() {
         let session = SessionRef::new(SessionSource::Codex, "019f-test");
+        let reasonix = SessionRef::new(SessionSource::Reasonix, "20260817-test");
 
         assert_eq!(session.storage_key(), "codex:019f-test");
+        assert_eq!(reasonix.storage_key(), "reasonix:20260817-test");
     }
 
     #[test]
@@ -128,6 +136,10 @@ mod tests {
         assert_eq!(
             session_command(SessionSource::Codex, None, SessionAction::Start),
             vec!["codex"]
+        );
+        assert_eq!(
+            session_command(SessionSource::Reasonix, None, SessionAction::Start),
+            vec!["reasonix"]
         );
         assert_eq!(
             session_command(
@@ -156,6 +168,18 @@ mod tests {
         assert_eq!(
             session_command(SessionSource::Codex, Some("019f-test"), SessionAction::Fork),
             vec!["codex", "fork", "019f-test"]
+        );
+        assert_eq!(
+            session_command(
+                SessionSource::Reasonix,
+                Some("20260817-070035.889638000-deepseek-v4-pro"),
+                SessionAction::Resume
+            ),
+            vec![
+                "reasonix",
+                "--resume",
+                "20260817-070035.889638000-deepseek-v4-pro"
+            ]
         );
     }
 

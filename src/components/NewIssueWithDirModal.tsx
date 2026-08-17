@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { FolderKanban, Loader2, X } from "lucide-react";
 import type { SessionSource } from "../types";
+import { SESSION_SOURCES, sourceLabel } from "../utils/sessionSource";
 
 interface Props {
   initialSource: SessionSource;
@@ -140,8 +141,8 @@ export default function NewIssueWithDirModal({ initialSource, onCreate, onClose 
         {directory && (
           <div className="mb-4">
             <label className="text-xs text-gray-500 block mb-1">启动方式</label>
-            <div className="grid grid-cols-2 bg-surface-hover border border-surface-border rounded-md p-0.5">
-              {(["opencode", "codex"] as SessionSource[]).map(value => (
+            <div className="grid grid-cols-3 bg-surface-hover border border-surface-border rounded-md p-0.5">
+              {SESSION_SOURCES.map(value => (
                 <button
                   key={value}
                   type="button"
@@ -152,7 +153,7 @@ export default function NewIssueWithDirModal({ initialSource, onCreate, onClose 
                       : "text-gray-500 hover:text-gray-300"
                   }`}
                 >
-                  {value === "codex" ? "Codex" : "OpenCode"}
+                  {sourceLabel(value)}
                 </button>
               ))}
             </div>

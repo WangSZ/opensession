@@ -1,8 +1,9 @@
-export type SessionSource = "opencode" | "codex";
+export type SessionSource = "opencode" | "codex" | "reasonix";
 
 export interface SourceCounts {
   opencode: number;
   codex: number;
+  reasonix: number;
 }
 
 export type SourceStatus = "available" | "not_installed" | "no_sessions" | "unsupported_schema" | "read_error";
@@ -10,6 +11,7 @@ export type SourceStatus = "available" | "not_installed" | "no_sessions" | "unsu
 export interface SourceStatuses {
   opencode: SourceStatus;
   codex: SourceStatus;
+  reasonix: SourceStatus;
 }
 
 export interface DirectoryGroup {

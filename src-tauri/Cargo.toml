@@ -1,7 +1,7 @@
 [package]
 name = "opensession"
 version = "0.1.0"
-description = "OpenCode and Codex Session Manager"
+description = "OpenCode, Codex, and Reasonix Session Manager"
 authors = ["OpenSession Contributors"]
 license = "MIT"
 repository = "https://github.com/WangSZ/opensession"

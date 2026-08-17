@@ -126,6 +126,7 @@ pub fn query_directory_groups(conn: &Connection) -> Result<Vec<DirectoryGroup>, 
                 source_counts: SourceCounts {
                     opencode: 0,
                     codex: session_count,
+                    reasonix: 0,
                 },
             })
         })

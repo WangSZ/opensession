@@ -4,6 +4,7 @@ pub mod config;
 pub mod db;
 pub mod models;
 pub mod plugins;
+pub mod reasonix_db;
 pub mod session_repository;
 pub mod session_sources;
 
