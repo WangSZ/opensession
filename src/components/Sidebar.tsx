@@ -112,7 +112,7 @@ export default function Sidebar({
               <button
                 className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-200 transition-colors p-0.5"
                 onClick={onToggleShowHidden}
-                title={showHidden ? "隐藏已隐藏的目录" : "显示已隐藏的目录"}
+                title={showHidden ? "仅显示正常目录" : "显示所有（含已隐藏、已删除的目录）"}
               >
                 {showHidden ? <EyeOff size={15} /> : <Eye size={15} />}
               </button>

@@ -391,7 +391,7 @@ function App() {
   const filteredDirs = useMemo(() => {
     let list = directories;
     if (!showHidden) {
-      list = list.filter(d => !d.hidden);
+      list = list.filter(d => !d.hidden && !d.is_missing);
     }
     const q = searchQuery.toLowerCase();
     if (q) {
