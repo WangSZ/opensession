@@ -43,6 +43,10 @@ export default function SearchOverlay({ onClose }: Props) {
   const [query, setQuery] = useState("");
   const [mode, setMode] = useState<SearchMode>("name");
   const [scopeKey, setScopeKey] = useState("home");
+  const [maxResults, setMaxResults] = useState(() => {
+    const stored = Number(localStorage.getItem("opensession:max-results"));
+    return stored > 0 ? stored : 200;
+  });
   const [customScopes, setCustomScopes] = useState<SearchScopeDef[]>([]);
   const [scopePanelOpen, setScopePanelOpen] = useState(false);
   const [managingScope, setManagingScope] = useState(false);
@@ -94,6 +98,11 @@ export default function SearchOverlay({ onClose }: Props) {
 
   useEffect(() => () => cancelActive(), []);
 
+  function handleMaxResultsChange(value: number) {
+    setMaxResults(value);
+    localStorage.setItem("opensession:max-results", String(value));
+  }
+
   async function runSearch(q: string, m: SearchMode, key: string) {
     cancelActive();
     const searchId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -110,7 +119,7 @@ export default function SearchOverlay({ onClose }: Props) {
       key === "global" ? { kind: "global" } :
       { kind: "custom", id: key };
     try {
-      await invoke("start_search", { searchId, query: q, mode: m, scope });
+      await invoke("start_search", { searchId, query: q, mode: m, scope, limit: maxResults });
     } catch (e) {
       setSearching(false);
       setDone(true);
@@ -130,7 +139,7 @@ export default function SearchOverlay({ onClose }: Props) {
     }
     const t = setTimeout(() => runSearch(q, mode, scopeKey), 300);
     return () => clearTimeout(t);
-  }, [query, mode, scopeKey]);
+  }, [query, mode, scopeKey, maxResults]);
 
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {
@@ -213,7 +222,7 @@ export default function SearchOverlay({ onClose }: Props) {
     : searching
     ? "搜索中…"
     : done
-    ? `${results.length} 个结果${truncated ? "（已达上限 5000）" : ""}${elapsedMs !== null ? ` · ${(elapsedMs / 1000).toFixed(2)}s` : ""}`
+    ? `${results.length} 个结果${truncated ? `（已达上限 ${maxResults}）` : ""}${elapsedMs !== null ? ` · ${(elapsedMs / 1000).toFixed(2)}s` : ""}`
     : "";
 
   return (
@@ -418,7 +427,22 @@ export default function SearchOverlay({ onClose }: Props) {
 
         <div className="px-4 py-2 border-t border-surface-border flex items-center justify-between text-xs text-gray-600">
           <span>{statusText}</span>
-          <span>↑↓ 选择 · ⏎ 在 Finder 中显示 · Esc 关闭</span>
+          <div className="flex items-center gap-3">
+            <label className="flex items-center gap-1" title="最大结果数">
+              最多
+              <select
+                value={maxResults}
+                onChange={e => handleMaxResultsChange(Number(e.target.value))}
+                className="bg-surface-hover border border-surface-border rounded px-1 py-0.5 text-xs text-gray-400 hover:text-gray-200 focus:outline-none focus:border-indigo-500 transition-colors"
+              >
+                {[200, 500, 2000, 10000].map(n => (
+                  <option key={n} value={n}>{n}</option>
+                ))}
+              </select>
+              条
+            </label>
+            <span>↑↓ 选择 · ⏎ 在 Finder 中显示 · Esc 关闭</span>
+          </div>
         </div>
       </div>
     </div>

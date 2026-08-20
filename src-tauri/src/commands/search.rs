@@ -10,7 +10,8 @@ use tokio::io::AsyncBufReadExt;
 use tokio::sync::mpsc;
 use unicode_normalization::UnicodeNormalization;
 
-const MAX_RESULTS: usize = 5000;
+const DEFAULT_LIMIT: usize = 200;
+const MAX_LIMIT: usize = 10000;
 const BATCH_SIZE: usize = 200;
 const EVENT_NAME: &str = "search://results";
 
@@ -238,11 +239,13 @@ pub async fn start_search(
     query: String,
     mode: SearchMode,
     scope: SearchScopeArg,
+    limit: Option<usize>,
 ) -> Result<(), String> {
     let query = query.trim().to_string();
     if query.is_empty() {
         return Ok(());
     }
+    let limit = limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT);
     let directories = resolve_scope(&scope)?;
     let mut jobs: Vec<Vec<String>> = Vec::new();
     let mut queries = vec![query.clone()];
@@ -330,7 +333,7 @@ pub async fn start_search(
                 let path = raw.trim().to_string();
                 if !path.is_empty() && seen.insert(path.clone()) {
                     batch.push(path);
-                    if seen.len() >= MAX_RESULTS {
+                    if seen.len() >= limit {
                         truncated = true;
                         break;
                     }
