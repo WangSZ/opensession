@@ -15,14 +15,43 @@ const MAX_LIMIT: usize = 10000;
 const BATCH_SIZE: usize = 200;
 const EVENT_NAME: &str = "search://results";
 
-#[derive(Serialize, Deserialize, Clone, Copy)]
+#[cfg(target_os = "macos")]
+const MDFIND_BIN: &str = "/usr/bin/mdfind";
+#[cfg(not(target_os = "macos"))]
+const MDFIND_BIN: &str = "mdfind";
+
+fn log_path() -> Option<std::path::PathBuf> {
+    #[cfg(target_os = "macos")]
+    {
+        dirs::home_dir().map(|h| h.join("Library").join("Logs").join("opensession").join("file-search.log"))
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        dirs::data_dir().map(|d| d.join("opensession").join("logs").join("file-search.log"))
+    }
+}
+
+fn flog(msg: &str) {
+    let Some(path) = log_path() else { return };
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let ts = chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f");
+    let line = format!("[{}] {}\n", ts, msg);
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+        use std::io::Write;
+        let _ = f.write_all(line.as_bytes());
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug)]
 #[serde(rename_all = "lowercase")]
 pub enum SearchMode {
     Name,
     Content,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(tag = "kind", rename_all = "lowercase")]
 pub enum SearchScopeArg {
     Home,
@@ -107,6 +136,31 @@ pub fn delete_search_scope(id: String) -> Result<(), String> {
     let mut scopes = load_scopes();
     scopes.retain(|s| s.id != id);
     save_scopes(&scopes)
+}
+
+// Ad-hoc signed rebuilds get a new cdhash, orphaning previous TCC grants.
+// Spotlight then silently filters results inside protected directories.
+// Probing them here triggers the system permission prompt so the grant is
+// recorded against the current binary and unfiltered results come back.
+#[cfg(target_os = "macos")]
+fn probe_protected_dirs() {
+    let Some(home) = dirs::home_dir() else { return };
+    for name in ["Downloads", "Documents", "Desktop"] {
+        let dir = home.join(name);
+        if !dir.exists() {
+            continue;
+        }
+        match std::fs::read_dir(&dir) {
+            Ok(_) => flog(&format!("probe: {} accessible", dir.display())),
+            Err(e) => flog(&format!("probe: {} DENIED ({})", dir.display(), e)),
+        }
+    }
+}
+
+fn scope_covers_home(directories: &[String]) -> bool {
+    let Some(home) = dirs::home_dir() else { return false };
+    let home = home.to_string_lossy().to_string();
+    directories.is_empty() || directories.iter().any(|d| d == &home)
 }
 
 fn resolve_scope(scope: &SearchScopeArg) -> Result<Vec<String>, String> {
@@ -200,7 +254,7 @@ fn build_mdfind_args(directories: &[String], query: &str, mode: SearchMode) -> V
     let mut jobs = Vec::new();
     if directories.is_empty() {
         // Global search: no -onlyin (all indexed volumes)
-        let mut args = vec!["mdfind".to_string()];
+        let mut args = vec![MDFIND_BIN.to_string()];
         if matches!(mode, SearchMode::Name) {
             args.push("-name".to_string());
         }
@@ -208,7 +262,7 @@ fn build_mdfind_args(directories: &[String], query: &str, mode: SearchMode) -> V
         jobs.push(args);
     } else {
         for dir in directories {
-            let mut args = vec!["mdfind".to_string(), "-onlyin".to_string(), dir.clone()];
+            let mut args = vec![MDFIND_BIN.to_string(), "-onlyin".to_string(), dir.clone()];
             if matches!(mode, SearchMode::Name) {
                 args.push("-name".to_string());
             }
@@ -222,6 +276,7 @@ fn build_mdfind_args(directories: &[String], query: &str, mode: SearchMode) -> V
 #[tauri::command]
 pub fn cancel_search(search_id: String) -> Result<(), String> {
     if let Some(active) = ACTIVE_SEARCHES.lock().unwrap().get(&search_id) {
+        flog(&format!("cancel: id={}", search_id));
         active.cancelled.store(true, Ordering::SeqCst);
         let mut children = active.children.lock().unwrap();
         for child in children.iter_mut() {
@@ -246,12 +301,35 @@ pub async fn start_search(
         return Ok(());
     }
     let limit = limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT);
-    let directories = resolve_scope(&scope)?;
+    flog(&format!(
+        "start: id={} query={:?} mode={:?} limit={} exe={:?} cwd={:?}",
+        search_id,
+        query,
+        mode,
+        limit,
+        std::env::current_exe().ok(),
+        std::env::current_dir().ok()
+    ));
+    let directories = match resolve_scope(&scope) {
+        Ok(d) => d,
+        Err(e) => {
+            flog(&format!("scope resolve FAILED: {} ({:?})", e, scope));
+            return Err(e);
+        }
+    };
     let mut jobs: Vec<Vec<String>> = Vec::new();
     let mut queries = vec![query.clone()];
     queries.extend(expand_query_variants(&query));
+    flog(&format!("scope resolved: dirs={:?} variants={:?}", directories, &queries[1..]));
+    #[cfg(target_os = "macos")]
+    if scope_covers_home(&directories) {
+        probe_protected_dirs();
+    }
     for q in &queries {
         jobs.extend(build_mdfind_args(&directories, q, mode));
+    }
+    for j in &jobs {
+        flog(&format!("job: {:?}", j));
     }
 
     cancel_search(search_id.clone())?;
@@ -272,23 +350,41 @@ pub async fn start_search(
         let cancelled = cancelled.clone();
         let children = children.clone();
         tauri::async_runtime::spawn(async move {
+            let job_desc = args.join(" ");
             let mut cmd = tokio::process::Command::new(&args[0]);
             cmd.args(&args[1..])
                 .stdout(std::process::Stdio::piped())
-                .stderr(std::process::Stdio::null());
+                .stderr(std::process::Stdio::piped());
             let mut child = match cmd.spawn() {
                 Ok(c) => c,
-                Err(_) => return,
+                Err(e) => {
+                    flog(&format!("spawn FAILED: {} ({})", job_desc, e));
+                    return;
+                }
             };
+            let pid = child.id();
             let stdout = match child.stdout.take() {
                 Some(s) => s,
                 None => return,
             };
+            if let Some(mut stderr) = child.stderr.take() {
+                tauri::async_runtime::spawn(async move {
+                    let mut buf = String::new();
+                    let _ = tokio::io::AsyncReadExt::read_to_string(&mut stderr, &mut buf).await;
+                    for line in buf.lines() {
+                        if !line.contains("[UserQueryParser]") {
+                            flog(&format!("mdfind stderr: {}", line));
+                        }
+                    }
+                });
+            }
             children.lock().unwrap().push(child);
             let mut lines = tokio::io::BufReader::new(stdout).lines();
+            let mut count = 0usize;
             while !cancelled.load(Ordering::SeqCst) {
                 match lines.next_line().await {
                     Ok(Some(line)) => {
+                        count += 1;
                         if tx.send(line).await.is_err() {
                             break;
                         }
@@ -296,6 +392,22 @@ pub async fn start_search(
                     _ => break,
                 }
             }
+            let exit = if !cancelled.load(Ordering::SeqCst) {
+                let taken = {
+                    let mut reg = children.lock().unwrap();
+                    reg.iter().position(|c| c.id() == pid).map(|i| reg.swap_remove(i))
+                };
+                match taken {
+                    Some(mut c) => match c.wait().await {
+                        Ok(status) => format!("{}", status),
+                        Err(e) => format!("wait error: {}", e),
+                    },
+                    None => "no child handle".to_string(),
+                }
+            } else {
+                "cancelled".to_string()
+            };
+            flog(&format!("job done: pid={:?} lines={} exit={} ({})", pid, count, exit, job_desc));
         });
     }
     drop(tx);
@@ -310,6 +422,13 @@ pub async fn start_search(
             if paths.is_empty() && !done {
                 return;
             }
+            flog(&format!(
+                "emit: id={} batch={} done={} truncated={}",
+                search_id,
+                paths.len(),
+                done,
+                truncated
+            ));
             let _ = app.emit(
                 EVENT_NAME,
                 json!({
@@ -356,6 +475,13 @@ pub async fn start_search(
             children.clear();
         }
 
+        flog(&format!(
+            "done: id={} total={} truncated={} cancelled={}",
+            search_id,
+            seen.len(),
+            truncated,
+            cancelled.load(Ordering::SeqCst)
+        ));
         flush(&app_handle, &batch, true, truncated);
         ACTIVE_SEARCHES.lock().unwrap().remove(&search_id);
     });

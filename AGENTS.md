@@ -48,6 +48,8 @@ All commands registered in `lib.rs` via `generate_handler![]`.
 |------|----------|--------|
 | Directory metadata | `$XDG_CONFIG_HOME/opensession/directory_meta.json` | `HashMap<String, DirectoryMeta>` (tags, pinned, hidden) |
 | Summary cache | `$XDG_DATA_HOME/opensession/summaries.json` | `HashMap<String, Summary>` — migrated from old `{opencode_data_dir}/opensession/summaries.json` on first run |
+| Search scopes | `$XDG_CONFIG_HOME/opensession/search_scopes.json` | `Vec<SearchScopeDef>` — custom multi-directory search collections |
+| File search log | `~/Library/Logs/opensession/file-search.log` (macOS) | per-search trace: jobs, exit codes, emits |
 
 ## Registered Tauri Commands
 
@@ -67,6 +69,12 @@ All commands registered in `lib.rs` via `generate_handler![]`.
 | `toggle_directory_hidden` | `path: String` | `bool` (new state) |
 | `rename_directory_meta` | `old: String`, `new: String` | `()` — preserves tags/pin, resets hidden |
 | `open_in_file_manager` | `directory: String` | `()` — Finder/Explorer/xdg-open |
+| `reveal_file` | `path: String` | `()` — Finder reveal (`open -R`)/Explorer select |
+| `start_search` | `searchId: String`, `query: String`, `mode: name\|content`, `scope: {kind: home\|global\|custom, id?}`, `limit?: usize` | `()` — mdfind-based, results via event |
+| `cancel_search` | `searchId: String` | `()` |
+| `list_search_scopes` | — | `Vec<SearchScopeDef>` |
+| `add_search_scope` | `name: String`, `directories: Vec<String>` | `SearchScopeDef` |
+| `delete_search_scope` | `id: String` | `()` |
 
 ## Platform Details
 
@@ -75,12 +83,14 @@ All commands registered in `lib.rs` via `generate_handler![]`.
 - Linux: `x-terminal-emulator -e bash -c "cd ... && <agent> ..."`
 - The selected `opencode`, `codex`, or `reasonix` CLI must be on `PATH`
 - Clipboard: `navigator.clipboard.writeText()` with `textarea` fallback — no Tauri plugin needed
+- File search uses `/usr/bin/mdfind` (Spotlight). Query variants are expanded for Kangxi radicals (U+2F00–U+2FDF) since Spotlight name matching does not fold them. On macOS the search probes Downloads/Documents/Desktop first: ad-hoc rebuilds change the cdhash and orphan TCC grants, so Spotlight silently filters protected folders until the probe-triggered prompt is granted
 
 ## Tauri Events
 
 | Event | Payload | When |
 |-------|---------|------|
 | `summary://generated` | `{directory, summary?} \| {directory, error?}` | `generate_summary` background task completes |
+| `search://results` | `{searchId, paths: string[], done, truncated}` | `start_search` streams mdfind results in batches |
 
 ## Frontend Components
 
@@ -95,6 +105,7 @@ All commands registered in `lib.rs` via `generate_handler![]`.
 | `NewTagModal` | `src/components/NewTagModal.tsx` | Create new tag |
 | `ConfirmDialog` | `src/components/ConfirmDialog.tsx` | Destructive confirmation (delete tag) |
 | `CopyButton` | `src/components/CopyButton.tsx` | Reusable copy btn, icon changes to checkmark for 1.5s, variants: `icon` / `full` |
+| `SearchOverlay` | `src/components/SearchOverlay.tsx` | Cmd+Shift+F Spotlight-style file search (name/full-text, scopes, Kangxi-radical-aware highlight) |
 
 ## Command Copy (3 locations)
 
