@@ -14,6 +14,7 @@ import EditSummaryModal from "./components/EditSummaryModal";
 import ConfirmDialog from "./components/ConfirmDialog";
 import WorktreeModal from "./components/WorktreeModal";
 import SourcePickerModal from "./components/SourcePickerModal";
+import SearchOverlay from "./components/SearchOverlay";
 import IssueModal from "./components/IssueModal";
 import NewIssueWithDirModal from "./components/NewIssueWithDirModal";
 import { invoke } from "@tauri-apps/api/core";
@@ -89,6 +90,7 @@ function App() {
   const [selectedIssue, setSelectedIssue] = useState<IssueWithSessions | null>(null);
   const [newIssueWithDirModal, setNewIssueWithDirModal] = useState(false);
   const [dirIssueModal, setDirIssueModal] = useState<{ directory: string; directoryName: string } | null>(null);
+  const [searchOverlay, setSearchOverlay] = useState(false);
 
   const sessionIssueMap = useMemo(() => {
     const map: Record<string, Issue> = {};
@@ -135,6 +137,10 @@ function App() {
       if ((e.metaKey || e.ctrlKey) && e.key === "w") {
         e.preventDefault();
         getCurrentWindow().close();
+      }
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === "f") {
+        e.preventDefault();
+        setSearchOverlay(v => !v);
       }
     }
     document.addEventListener("keydown", handleKey);
@@ -1119,6 +1125,7 @@ function App() {
         />
       )}
       </div>
+      {searchOverlay && <SearchOverlay onClose={() => setSearchOverlay(false)} />}
       {error && (
         <div className="fixed bottom-4 right-4 bg-red-600 text-white px-4 py-2 rounded-lg shadow-lg text-sm">
           {error}

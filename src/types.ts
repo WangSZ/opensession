@@ -111,3 +111,23 @@ export interface IssueWithSessions {
   sessions: LinkedSession[];
   directories: LinkedDirectory[];
 }
+
+export type SearchMode = "name" | "content";
+
+export type SearchScopeArg =
+  | { kind: "home" }
+  | { kind: "global" }
+  | { kind: "custom"; id: string };
+
+export interface SearchScopeDef {
+  id: string;
+  name: string;
+  directories: string[];
+}
+
+export interface SearchResultsPayload {
+  searchId: string;
+  paths: string[];
+  done: boolean;
+  truncated: boolean;
+}
