@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { DirectoryGroup, Session, SessionDetail, SessionSource, SourceStatuses, Summary, Issue, IssueWithSessions, IssueComment } from "../types";
+import type { DirectoryListResponse, Session, SessionDetail, SessionSource, SourceStatuses, Summary, Issue, IssueWithSessions, IssueComment } from "../types";
 
 export function useCommands(onAfterCommand?: () => void) {
   async function wrap<T>(fn: () => Promise<T>): Promise<T> {
@@ -9,10 +9,10 @@ export function useCommands(onAfterCommand?: () => void) {
   }
 
   return {
-    listDirectories: () => invoke<DirectoryGroup[]>("list_directories"),
+    listDirectories: () => invoke<DirectoryListResponse>("list_directories"),
     getSourceStatuses: () => invoke<SourceStatuses>("get_source_statuses"),
-    getSessions: (directory: string) => wrap(() => invoke<Session[]>("get_sessions", { directory })),
-    getSessionDetail: (sessionSource: SessionSource, sessionId: string) => wrap(() => invoke<SessionDetail>("get_session_detail", { sessionSource, sessionId })),
+    getSessions: (directory: string) => invoke<Session[]>("get_sessions", { directory }),
+    getSessionDetail: (sessionSource: SessionSource, sessionId: string) => invoke<SessionDetail>("get_session_detail", { sessionSource, sessionId }),
     generateSummary: (directory: string) => invoke<void>("generate_summary", { directory }),
     setCachedSummary: (directory: string, summary: Summary) =>
       wrap(() => invoke<void>("set_cached_summary", { directory, summary })),

@@ -27,6 +27,12 @@ pub struct SourceStatuses {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DirectoryListResponse {
+    pub directories: Vec<DirectoryGroup>,
+    pub statuses: SourceStatuses,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DirectoryGroup {
     pub path: String,
     pub name: String,

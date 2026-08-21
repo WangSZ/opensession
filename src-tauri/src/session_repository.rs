@@ -82,6 +82,10 @@ fn collect_available<T>(
 }
 
 pub fn status_from_directory_result(result: Result<Vec<DirectoryGroup>, String>) -> SourceStatus {
+    status_from_directory_ref(&result)
+}
+
+fn status_from_directory_ref(result: &Result<Vec<DirectoryGroup>, String>) -> SourceStatus {
     match result {
         Ok(groups) if groups.is_empty() => SourceStatus::NoSessions,
         Ok(_) => SourceStatus::Available,
@@ -99,11 +103,24 @@ pub fn get_source_statuses() -> SourceStatuses {
     }
 }
 
-pub fn list_directory_groups() -> Result<Vec<DirectoryGroup>, String> {
+pub fn list_directory_groups_with_statuses() -> Result<(Vec<DirectoryGroup>, SourceStatuses), String> {
+    let opencode = crate::db::list_directory_groups();
+    let codex = crate::codex_db::list_directory_groups();
+    let reasonix = crate::reasonix_db::list_directory_groups();
+
+    // Derive per-source status from the same results we are about to merge,
+    // so `list_directories` + `get_source_statuses` no longer need to query
+    // each source twice.
+    let statuses = SourceStatuses {
+        opencode: status_from_directory_ref(&opencode),
+        codex: status_from_directory_ref(&codex),
+        reasonix: status_from_directory_ref(&reasonix),
+    };
+
     let mut groups = merge_directory_groups(collect_available(vec![
-        ("opencode", crate::db::list_directory_groups()),
-        ("codex", crate::codex_db::list_directory_groups()),
-        ("reasonix", crate::reasonix_db::list_directory_groups()),
+        ("opencode", opencode),
+        ("codex", codex),
+        ("reasonix", reasonix),
     ])?);
 
     let cache_path = crate::config::app_data_dir().join("summaries.json");
@@ -117,7 +134,11 @@ pub fn list_directory_groups() -> Result<Vec<DirectoryGroup>, String> {
             group.summary = summaries.get(&group.path).cloned();
         }
     }
-    Ok(groups)
+    Ok((groups, statuses))
+}
+
+pub fn list_directory_groups() -> Result<Vec<DirectoryGroup>, String> {
+    Ok(list_directory_groups_with_statuses()?.0)
 }
 
 fn get_source_sessions(
@@ -125,35 +146,61 @@ fn get_source_sessions(
     list_groups: fn() -> Result<Vec<DirectoryGroup>, String>,
     get_sessions: fn(&str) -> Result<Vec<Session>, String>,
 ) -> Result<Vec<Session>, String> {
-    let paths: Vec<_> = list_groups()?
-        .into_iter()
-        .filter(|group| normalize_directory_path(&group.path) == target)
-        .map(|group| group.path)
-        .collect();
-    let mut sessions = Vec::new();
-    for path in paths {
-        sessions.extend(get_sessions(&path)?);
+    // Fast path: the source almost always stores the already-canonical
+    // directory, so a direct equality query hits without enumerating every
+    // directory group. That avoids a full `GROUP BY directory` aggregation,
+    // re-reading/normalizing summaries, and stat'ing every directory on disk
+    // (and for Reasonix, scanning all transcript files) — work that is wasted
+    // when the stored path already matches the normalized target.
+    let mut sessions = get_sessions(target)?;
+
+    // Fallback for stored paths that are not byte-identical to the normalized
+    // target (symlinks, trailing ".", "..", casing on case-insensitive FS).
+    if sessions.is_empty() {
+        let alt_paths: Vec<String> = list_groups()?
+            .into_iter()
+            .filter(|group| normalize_directory_path(&group.path) == target)
+            .map(|group| group.path)
+            .filter(|path| path != target)
+            .collect();
+        for path in alt_paths {
+            sessions.extend(get_sessions(&path)?);
+        }
     }
+
     Ok(sessions)
 }
 
 pub fn get_sessions(directory: &str) -> Result<Vec<Session>, String> {
     let target = normalize_directory_path(directory);
-    let opencode = get_source_sessions(
-        &target,
-        crate::db::list_directory_groups,
-        crate::db::get_sessions,
-    );
-    let codex = get_source_sessions(
-        &target,
-        crate::codex_db::list_directory_groups,
-        crate::codex_db::get_sessions,
-    );
-    let reasonix = get_source_sessions(
-        &target,
-        crate::reasonix_db::list_directory_groups,
-        crate::reasonix_db::get_sessions,
-    );
+
+    // Query the three independent read-only sources in parallel so the total
+    // latency is the max of the sources rather than their sum (Reasonix file
+    // scanning in particular dominates otherwise).
+    let (opencode, codex, reasonix) = std::thread::scope(|scope| {
+        let oc = scope.spawn(|| {
+            get_source_sessions(&target, crate::db::list_directory_groups, crate::db::get_sessions)
+        });
+        let cx = scope.spawn(|| {
+            get_source_sessions(
+                &target,
+                crate::codex_db::list_directory_groups,
+                crate::codex_db::get_sessions,
+            )
+        });
+        let rx = scope.spawn(|| {
+            get_source_sessions(
+                &target,
+                crate::reasonix_db::list_directory_groups,
+                crate::reasonix_db::get_sessions,
+            )
+        });
+        (oc.join(), cx.join(), rx.join())
+    });
+
+    let opencode = opencode.unwrap_or_else(|e| Err(format!("opencode thread panicked: {e:?}")));
+    let codex = codex.unwrap_or_else(|e| Err(format!("codex thread panicked: {e:?}")));
+    let reasonix = reasonix.unwrap_or_else(|e| Err(format!("reasonix thread panicked: {e:?}")));
 
     let mut sessions = merge_sessions(collect_available(vec![
         ("opencode", opencode),

@@ -14,6 +14,11 @@ export interface SourceStatuses {
   reasonix: SourceStatus;
 }
 
+export interface DirectoryListResponse {
+  directories: DirectoryGroup[];
+  statuses: SourceStatuses;
+}
+
 export interface DirectoryGroup {
   path: string;
   name: string;

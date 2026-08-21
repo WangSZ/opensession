@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { useCommands } from "./hooks/useCommands";
 import Sidebar from "./components/Sidebar";
@@ -43,7 +43,7 @@ function sourceStatusWarning(statuses: SourceStatuses): string | null {
 
 function App() {
   const {
-    listDirectories, getSourceStatuses, getSessions, getSessionDetail, generateSummary,
+    listDirectories, getSessions, getSessionDetail, generateSummary,
     setCachedSummary, deleteCachedSummary,
     openInTerminal, openPlainTerminal, forkSession, setDirectoryTags, deleteTagGlobal, togglePin, openInFileManager, openInVSCode, openInJetBrains,
     toggleHidden, bootstrapSession, renameDirectoryMeta, openWorktree, removeWorktree,
@@ -92,6 +92,8 @@ function App() {
   const [dirIssueModal, setDirIssueModal] = useState<{ directory: string; directoryName: string } | null>(null);
   const [searchOverlay, setSearchOverlay] = useState(false);
 
+  const reloadTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const sessionIssueMap = useMemo(() => {
     const map: Record<string, Issue> = {};
     for (const iws of issues) {
@@ -127,9 +129,17 @@ function App() {
     if (isMac) {
       enableModernWindowStyle({ cornerRadius: 10, offsetX: 0, offsetY: 0 });
     }
-    const onFocus = () => loadDirectories();
+    const onFocus = () => {
+      // Window focus can fire repeatedly (e.g. re-activation). Debounce so we
+      // don't trigger several concurrent directory reloads.
+      if (reloadTimer.current) clearTimeout(reloadTimer.current);
+      reloadTimer.current = setTimeout(() => loadDirectories(), 400);
+    };
     window.addEventListener("focus", onFocus);
-    return () => window.removeEventListener("focus", onFocus);
+    return () => {
+      if (reloadTimer.current) clearTimeout(reloadTimer.current);
+      window.removeEventListener("focus", onFocus);
+    };
   }, []);
 
   useEffect(() => {
@@ -150,15 +160,14 @@ function App() {
   async function loadDirectories() {
     setDbNotFound(false);
     try {
-      const [dirs, loadedIssues, statuses] = await Promise.all([
+      const [dirResult, loadedIssues] = await Promise.all([
         listDirectories(),
         getAllIssues().catch(() => [] as IssueWithSessions[]),
-        getSourceStatuses(),
       ]);
-      setDirectories(dirs);
-      setDbNotFound(dirs.length === 0);
+      setDirectories(dirResult.directories);
+      setDbNotFound(dirResult.directories.length === 0);
       setIssues(loadedIssues);
-      setSourceWarning(sourceStatusWarning(statuses));
+      setSourceWarning(sourceStatusWarning(dirResult.statuses));
       setError(null);
     } catch (e) {
       const msg = String(e);

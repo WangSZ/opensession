@@ -5,14 +5,18 @@ use super::git_info;
 use super::meta;
 
 #[tauri::command]
-pub async fn list_directories(app: tauri::AppHandle) -> Result<Vec<DirectoryGroup>, String> {
-    let mut groups = crate::session_repository::list_directory_groups()?;
+pub async fn list_directories(app: tauri::AppHandle) -> Result<DirectoryListResponse, String> {
+    let (mut groups, statuses) =
+        crate::session_repository::list_directory_groups_with_statuses()?;
     meta::merge_into(&mut groups);
     let stale = git_info::apply_cached_and_hide(&mut groups);
     if !stale.is_empty() {
         git_info::spawn_refresh(app, stale);
     }
-    Ok(groups)
+    Ok(DirectoryListResponse {
+        directories: groups,
+        statuses,
+    })
 }
 
 #[tauri::command]
