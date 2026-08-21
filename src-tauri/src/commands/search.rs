@@ -32,6 +32,10 @@ fn log_path() -> Option<std::path::PathBuf> {
 }
 
 fn flog(msg: &str) {
+    // Off by default; set OPENSESSION_SEARCH_LOG=1 to trace searches to a file
+    if std::env::var_os("OPENSESSION_SEARCH_LOG").is_none() {
+        return;
+    }
     let Some(path) = log_path() else { return };
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
