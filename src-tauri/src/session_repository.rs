@@ -1,8 +1,32 @@
 use std::collections::HashMap;
 use std::path::{Component, Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 use crate::models::{DirectoryGroup, Session, SessionDetail, SourceStatus, SourceStatuses};
 use crate::session_sources::SessionSource;
+
+/// Merged directory groups hit three SQLite sources plus per-directory
+/// filesystem stats, so they are cached briefly to absorb reload bursts
+/// (window focus, git_info events, post-command refreshes).
+const DIRECTORY_CACHE_TTL: Duration = Duration::from_millis(1000);
+
+struct DirectoryCacheEntry {
+    at: Instant,
+    groups: Vec<DirectoryGroup>,
+    statuses: SourceStatuses,
+}
+
+fn directory_cache() -> &'static Mutex<Option<DirectoryCacheEntry>> {
+    static CACHE: OnceLock<Mutex<Option<DirectoryCacheEntry>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(None))
+}
+
+pub fn invalidate_directory_cache() {
+    if let Ok(mut guard) = directory_cache().lock() {
+        *guard = None;
+    }
+}
 
 pub fn normalize_directory_path(path: &str) -> String {
     if let Ok(canonical) = std::fs::canonicalize(path) {
@@ -103,7 +127,25 @@ pub fn get_source_statuses() -> SourceStatuses {
     }
 }
 
-pub fn list_directory_groups_with_statuses() -> Result<(Vec<DirectoryGroup>, SourceStatuses), String> {
+fn apply_cached_summaries(groups: &mut [DirectoryGroup]) {
+    let cache_path = crate::config::app_data_dir().join("summaries.json");
+    let summaries: HashMap<String, crate::models::Summary> = std::fs::read_to_string(cache_path)
+        .ok()
+        .and_then(|json| serde_json::from_str(&json).ok())
+        .map(normalize_summary_keys)
+        .unwrap_or_default();
+    for group in groups.iter_mut() {
+        if group.summary.is_none() {
+            group.summary = summaries.get(&group.path).cloned();
+        }
+    }
+}
+
+/// Expensive part only: query the three sources, merge, and derive statuses.
+/// Summary application stays outside so summary edits show up immediately
+/// even on cache hits.
+fn compute_directory_groups_with_statuses(
+) -> Result<(Vec<DirectoryGroup>, SourceStatuses), String> {
     let opencode = crate::db::list_directory_groups();
     let codex = crate::codex_db::list_directory_groups();
     let reasonix = crate::reasonix_db::list_directory_groups();
@@ -117,23 +159,37 @@ pub fn list_directory_groups_with_statuses() -> Result<(Vec<DirectoryGroup>, Sou
         reasonix: status_from_directory_ref(&reasonix),
     };
 
-    let mut groups = merge_directory_groups(collect_available(vec![
+    let groups = merge_directory_groups(collect_available(vec![
         ("opencode", opencode),
         ("codex", codex),
         ("reasonix", reasonix),
     ])?);
 
-    let cache_path = crate::config::app_data_dir().join("summaries.json");
-    let summaries: HashMap<String, crate::models::Summary> = std::fs::read_to_string(cache_path)
-        .ok()
-        .and_then(|json| serde_json::from_str(&json).ok())
-        .map(normalize_summary_keys)
-        .unwrap_or_default();
-    for group in &mut groups {
-        if group.summary.is_none() {
-            group.summary = summaries.get(&group.path).cloned();
+    Ok((groups, statuses))
+}
+
+pub fn list_directory_groups_with_statuses() -> Result<(Vec<DirectoryGroup>, SourceStatuses), String>
+{
+    {
+        let cache = directory_cache().lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(entry) = cache.as_ref() {
+            if entry.at.elapsed() < DIRECTORY_CACHE_TTL {
+                return Ok((entry.groups.clone(), entry.statuses.clone()));
+            }
         }
     }
+
+    let (mut groups, statuses) = compute_directory_groups_with_statuses()?;
+    apply_cached_summaries(&mut groups);
+
+    if let Ok(mut cache) = directory_cache().lock() {
+        *cache = Some(DirectoryCacheEntry {
+            at: Instant::now(),
+            groups: groups.clone(),
+            statuses: statuses.clone(),
+        });
+    }
+
     Ok((groups, statuses))
 }
 

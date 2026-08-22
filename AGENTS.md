@@ -53,9 +53,11 @@ All commands registered in `lib.rs` via `generate_handler![]`.
 
 ## Registered Tauri Commands
 
+Merged directory groups are cached in-process for 1s (`session_repository::list_directory_groups_with_statuses`); meta/git-info overlays are applied fresh per call. Mutations that change source data (worktree add/remove) call `invalidate_directory_cache`. Git info (`commands/git_info.rs`) keeps its own in-memory cache (lazy-loaded from `git_info.json`, write-through), refreshes stale worktrees concurrently with a 5s per-repo cooldown, and emits `git_info://updated` only when a value actually changed.
+
 | invoke name | Parameters | Returns |
 |-------------|-----------|---------|
-| `list_directories` | — | `Vec<DirectoryGroup>` |
+| `list_directories` | `includeMissing?: bool` | `DirectoryListResponse` — merged groups (missing dirs filtered server-side unless `includeMissing`), `total_count` pre-filter, per-source statuses |
 | `get_sessions` | `directory: String` | `Vec<Session>` |
 | `get_session_detail` | `sessionSource: SessionSource`, `sessionId: String` | `SessionDetail` |
 | `search_directories` | `query: String` | `Vec<DirectoryGroup>` |

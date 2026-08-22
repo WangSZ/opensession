@@ -177,6 +177,7 @@ pub fn open_worktree(
     }
 
     let target = worktree_path.to_string_lossy().to_string();
+    crate::session_repository::invalidate_directory_cache();
     let args = session_command(session_source, None, SessionAction::Start);
     launch_cli_in_terminal(&target, &args, "worktree")
 }
@@ -230,6 +231,7 @@ pub fn remove_worktree(path: String, force: bool) -> Result<(), String> {
             }
             super::meta::mark_hidden(&[path.clone()]);
             super::git_info::clear_cache_entry(&path);
+            crate::session_repository::invalidate_directory_cache();
             return Ok(());
         }
         return Err("NOT_A_WORKTREE".to_string());
@@ -257,6 +259,7 @@ pub fn remove_worktree(path: String, force: bool) -> Result<(), String> {
 
     super::meta::mark_hidden(&[path.clone()]);
     super::git_info::clear_cache_entry(&path);
+    crate::session_repository::invalidate_directory_cache();
     Ok(())
 }
 

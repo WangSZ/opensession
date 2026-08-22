@@ -17,6 +17,8 @@ export interface SourceStatuses {
 export interface DirectoryListResponse {
   directories: DirectoryGroup[];
   statuses: SourceStatuses;
+  /** Groups before missing-directory filtering; absent in older responses. */
+  total_count?: number;
 }
 
 export interface DirectoryGroup {

@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { useCommands } from "./hooks/useCommands";
 import Sidebar from "./components/Sidebar";
@@ -42,6 +42,9 @@ function sourceStatusWarning(statuses: SourceStatuses): string | null {
 }
 
 function App() {
+  // loadDirectories is defined below as a useCallback; route it through a
+  // ref so command wrappers stay stable without forward-reference issues.
+  const afterCommandRef = useRef<(() => void) | null>(null);
   const {
     listDirectories, getSessions, getSessionDetail, generateSummary,
     setCachedSummary, deleteCachedSummary,
@@ -50,7 +53,7 @@ function App() {
     toggleSessionHidden, toggleSessionPin, setSessionNote,
     createIssue, updateIssue, deleteIssue, linkSessionToIssue, unlinkSessionFromIssue, getAllIssues,
     linkDirectoryToIssue, unlinkDirectoryFromIssue, getDirectoryIssue,
-  } = useCommands(loadDirectories);
+  } = useCommands(() => afterCommandRef.current?.());
 
   const [directories, setDirectories] = useState<DirectoryGroup[]>([]);
   const [lastSessionSource, setLastSessionSource] = useState<SessionSource>(() => {
@@ -59,6 +62,10 @@ function App() {
   });
   const [selectedDir, setSelectedDir] = useState<string | null>(null);
   const [sessions, setSessions] = useState<Session[]>([]);
+  // Which directory `sessions` belongs to. While it differs from selectedDir
+  // the panel keeps showing the old list (dimmed) instead of flashing a spinner.
+  const [sessionsDir, setSessionsDir] = useState<string | null>(null);
+  const requestedDirRef = useRef<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [detailSession, setDetailSession] = useState<SessionDetailType | null>(null);
   const [loadingDirs, setLoadingDirs] = useState(true);
@@ -93,6 +100,11 @@ function App() {
   const [searchOverlay, setSearchOverlay] = useState(false);
 
   const reloadTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const showHiddenRef = useRef(false);
+  const lastSessionSourceRef = useRef(lastSessionSource);
+  lastSessionSourceRef.current = lastSessionSource;
+  const issuesRef = useRef(issues);
+  issuesRef.current = issues;
 
   const sessionIssueMap = useMemo(() => {
     const map: Record<string, Issue> = {};
@@ -157,15 +169,19 @@ function App() {
     return () => document.removeEventListener("keydown", handleKey);
   }, []);
 
-  async function loadDirectories() {
+  const loadDirectories = useCallback(async () => {
     setDbNotFound(false);
     try {
+      // Missing directories are excluded server-side unless the user asked
+      // to see hidden/deleted entries; the response still reports how many
+      // groups exist in total so "no data" detection stays accurate.
+      const includeMissing = showHiddenRef.current;
       const [dirResult, loadedIssues] = await Promise.all([
-        listDirectories(),
+        listDirectories(includeMissing),
         getAllIssues().catch(() => [] as IssueWithSessions[]),
       ]);
       setDirectories(dirResult.directories);
-      setDbNotFound(dirResult.directories.length === 0);
+      setDbNotFound((dirResult.total_count ?? dirResult.directories.length) === 0);
       setIssues(loadedIssues);
       setSourceWarning(sourceStatusWarning(dirResult.statuses));
       setError(null);
@@ -179,7 +195,8 @@ function App() {
     } finally {
       setLoadingDirs(false);
     }
-  }
+  }, [listDirectories, getAllIssues]);
+  afterCommandRef.current = loadDirectories;
 
   async function loadIssues() {
     setLoadingIssues(true);
@@ -193,20 +210,28 @@ function App() {
     }
   }
 
-  async function handleSelectDir(path: string) {
+  const handleSelectDir = useCallback(async (path: string) => {
     setSelectedDir(path);
     setHighlightedSessionKey(null);
+    requestedDirRef.current = path;
     setLoadingSessions(true);
     try {
       const sess = await getSessions(path);
+      // Drop outdated responses when the user has switched directories
+      // before this fetch resolved.
+      if (requestedDirRef.current !== path) return;
       setSessions(sess);
+      setSessionsDir(path);
       setError(null);
     } catch (e) {
+      if (requestedDirRef.current !== path) return;
       setError(String(e));
     } finally {
-      setLoadingSessions(false);
+      if (requestedDirRef.current === path) {
+        setLoadingSessions(false);
+      }
     }
-  }
+  }, [getSessions]);
 
   async function handleDetail(session: Session) {
     try {
@@ -259,20 +284,6 @@ function App() {
       } else {
         setError(msg);
       }
-    }
-  }
-
-  async function handleNewDirectory() {
-    try {
-      const path = await open({
-        directory: true,
-        multiple: false,
-        title: "选择目录",
-      });
-      if (!path) return;
-      setSourcePicker({ kind: "open", directory: path });
-    } catch (e) {
-      setError(`打开目录选择器失败: ${String(e)}`);
     }
   }
 
@@ -406,9 +417,11 @@ function App() {
   );
 
   const filteredDirs = useMemo(() => {
+    // Missing directories are already excluded server-side unless showHidden
+    // was requested, so only the hidden flag needs filtering here.
     let list = directories;
     if (!showHidden) {
-      list = list.filter(d => !d.hidden && !d.is_missing);
+      list = list.filter(d => !d.hidden);
     }
     const q = searchQuery.toLowerCase();
     if (q) {
@@ -459,34 +472,73 @@ function App() {
     return () => { unlisten.then(fn => fn()); };
   }, []);
 
-  function handleToggleTag(tag: string) {
+  const handleToggleTag = useCallback((tag: string) => {
     setSelectedTags(prev =>
       prev.includes(tag) ? prev.filter(t => t !== tag) : [...prev, tag],
     );
-  }
+  }, [setSelectedTags]);
 
-  function handleContextOpen(path: string, x: number, y: number) {
+  const handleToggleShowHidden = useCallback(() => {
+    const next = !showHiddenRef.current;
+    showHiddenRef.current = next;
+    setShowHidden(next);
+    loadDirectories();
+  }, [loadDirectories]);
+
+  const handleContextOpen = useCallback((path: string, x: number, y: number) => {
     setCtxMenu({ path, x, y });
-  }
+  }, []);
 
-  function handleTagOverflowClick(path: string, x: number, y: number) {
+  const handleTagOverflowClick = useCallback((path: string, x: number, y: number) => {
     setTagOverflowPopup({ path, x, y });
-  }
+  }, []);
 
-  function handleSessionContextOpen(session: Session, x: number, y: number) {
+  const handleSessionContextOpen = useCallback((session: Session, x: number, y: number) => {
     setSessionCtxMenu({ source: session.source, sessionId: session.id, x, y });
-  }
+  }, []);
 
-  function handleIssueContextOpen(e: React.MouseEvent, issue: IssueWithSessions) {
+  const handleIssueContextOpen = useCallback((e: React.MouseEvent, issue: IssueWithSessions) => {
     e.preventDefault();
     setIssueCtxMenu({ issue, x: e.clientX, y: e.clientY });
-  }
+  }, []);
+
+  const handleSelectIssue = useCallback((issue: IssueWithSessions) => {
+    setSelectedIssue(issue);
+  }, []);
+
+  const handleCreateIssueClick = useCallback(() => setNewIssueWithDirModal(true), []);
+
+  const handleNewDirectory = useCallback(async () => {
+    try {
+      const path = await open({
+        directory: true,
+        multiple: false,
+        title: "选择目录",
+      });
+      if (!path) return;
+      setSourcePicker({ kind: "open", directory: path });
+    } catch (e) {
+      setError(`打开目录选择器失败: ${String(e)}`);
+    }
+  }, []);
+
+  const handleIssueIconClick = useCallback((issue: Issue) => {
+    const matched = issuesRef.current.find(i => i.issue.id === issue.id);
+    if (!matched) return;
+    setSidebarView("issues");
+    setSelectedIssue(matched);
+  }, []);
+
+  const handleSidebarOpen = useCallback((directory: string) => {
+    handleOpenInTerminal(directory, lastSessionSourceRef.current);
+  }, []);
 
   async function handleToggleSessionHidden(session: Session) {
     await toggleSessionHidden(session.source, session.id);
     if (selectedDir) {
       const sess = await getSessions(selectedDir);
       setSessions(sess);
+      setSessionsDir(selectedDir);
     }
   }
 
@@ -495,6 +547,7 @@ function App() {
     if (selectedDir) {
       const sess = await getSessions(selectedDir);
       setSessions(sess);
+      setSessionsDir(selectedDir);
     }
   }
 
@@ -503,14 +556,11 @@ function App() {
     if (selectedDir) {
       const sess = await getSessions(selectedDir);
       setSessions(sess);
+      setSessionsDir(selectedDir);
     }
   }
 
   // Issue handlers
-  function handleSelectIssue(issue: IssueWithSessions) {
-    setSelectedIssue(issue);
-  }
-
   function handleIssueOpenSession(source: SessionSource, sessionId: string, directory: string) {
     setSidebarView("dirs");
     setSelectedIssue(null);
@@ -518,6 +568,7 @@ function App() {
     setSelectedDir(directory);
     getSessions(directory).then(sess => {
       setSessions(sess);
+      setSessionsDir(directory);
     }).catch(e => setError(String(e)));
   }
 
@@ -905,7 +956,7 @@ function App() {
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
         onSelect={handleSelectDir}
-        onOpen={(directory) => handleOpenInTerminal(directory, lastSessionSource)}
+        onOpen={handleSidebarOpen}
         onContextMenuOpen={handleContextOpen}
         onTagOverflowClick={handleTagOverflowClick}
         generatingDirs={generatingDirs}
@@ -914,24 +965,18 @@ function App() {
         selectedTags={selectedTags}
         onToggleTag={handleToggleTag}
         showHidden={showHidden}
-        onToggleShowHidden={() => setShowHidden(v => !v)}
+        onToggleShowHidden={handleToggleShowHidden}
         sidebarView={sidebarView}
         onViewChange={setSidebarView}
         issues={issues}
         loadingIssues={loadingIssues}
         selectedIssueId={selectedIssue?.issue.id ?? null}
         onSelectIssue={handleSelectIssue}
-        onCreateIssue={() => setNewIssueWithDirModal(true)}
+        onCreateIssue={handleCreateIssueClick}
         onIssueContextMenu={handleIssueContextOpen}
         onNewDirectory={handleNewDirectory}
         dirIssueMap={dirIssueMap}
-        onIssueIconClick={(issue) => {
-          const matched = issues.find(i => i.issue.id === issue.id);
-          if (matched) {
-            setSidebarView("issues");
-            setSelectedIssue(matched);
-          }
-        }}
+        onIssueIconClick={handleIssueIconClick}
       />
       {dbNotFound ? (
         <div className="flex-1 flex items-center justify-center">
@@ -968,6 +1013,7 @@ function App() {
           directory={selectedDir}
           sessions={sessions}
           loading={loadingSessions}
+          stale={selectedDir !== sessionsDir}
           onStart={(source) => selectedDir && handleOpenInTerminal(selectedDir, source)}
           onResume={(session) => selectedDir && handleOpenInTerminal(selectedDir, session.source, session.id)}
           onDetail={handleDetail}

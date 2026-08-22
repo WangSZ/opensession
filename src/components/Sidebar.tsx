@@ -1,3 +1,5 @@
+import { memo, useCallback, useRef } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { Search, FolderKanban, Loader2, Eye, EyeOff, Bug, Plus } from "lucide-react";
 import DirectoryCard from "./DirectoryCard";
 import IssueSection from "./IssueSection";
@@ -36,7 +38,7 @@ interface Props {
   onIssueIconClick?: (issue: Issue) => void;
 }
 
-export default function Sidebar({
+function Sidebar({
   directories, selectedDir, searchQuery, onSearchChange,
   onSelect, onOpen, onContextMenuOpen, onTagOverflowClick,
   generatingDirs, loading,
@@ -46,6 +48,20 @@ export default function Sidebar({
   selectedIssueId, onSelectIssue, onCreateIssue, onIssueContextMenu,
   onNewDirectory, dirIssueMap, onIssueIconClick,
 }: Props) {
+  const listRef = useRef<HTMLDivElement>(null);
+
+  const virtualizer = useVirtualizer({
+    count: directories.length,
+    getScrollElement: () => listRef.current,
+    estimateSize: () => 61,
+    overscan: 8,
+  });
+
+  const handleCardIssueClick = useCallback((path: string) => {
+    const issue = dirIssueMap?.[path];
+    if (issue && onIssueIconClick) onIssueIconClick(issue);
+  }, [dirIssueMap, onIssueIconClick]);
+
   return (
     <aside className="w-72 flex-shrink-0 border-r border-surface-border bg-surface-card flex flex-col">
       <div className="flex border-b border-surface-border">
@@ -147,7 +163,7 @@ export default function Sidebar({
             )}
           </div>
 
-          <div className="flex-1 overflow-y-auto">
+          <div ref={listRef} className="flex-1 overflow-y-auto">
             {directories.length === 0 ? (
               loading ? (
                 <div className="flex items-center justify-center py-12 text-gray-500">
@@ -161,23 +177,34 @@ export default function Sidebar({
                 </div>
               )
             ) : (
-              directories.map(dir => (
-<DirectoryCard
-                    key={dir.path}
-                    directory={dir}
-                    isSelected={selectedDir === dir.path}
-                    isGenerating={generatingDirs.has(dir.path)}
-                    onSelect={() => onSelect(dir.path)}
-                    onOpen={() => onOpen(dir.path)}
-                    onContextMenuOpen={onContextMenuOpen}
-                    onTagOverflowClick={onTagOverflowClick}
-                  issueTitle={dirIssueMap?.[dir.path]?.title ?? null}
-                  onIssueClick={() => {
-                    const issue = dirIssueMap?.[dir.path];
-                    if (issue && onIssueIconClick) onIssueIconClick(issue);
-                  }}
-                />
-              ))
+              <div style={{ height: `${virtualizer.getTotalSize()}px`, position: "relative" }}>
+                {virtualizer.getVirtualItems().map(item => (
+                  <div
+                    key={directories[item.index].path}
+                    ref={virtualizer.measureElement}
+                    data-index={item.index}
+                    style={{
+                      position: "absolute",
+                      top: 0,
+                      left: 0,
+                      width: "100%",
+                      transform: `translateY(${item.start}px)`,
+                    }}
+                  >
+                    <DirectoryCard
+                      directory={directories[item.index]}
+                      isSelected={selectedDir === directories[item.index].path}
+                      isGenerating={generatingDirs.has(directories[item.index].path)}
+                      onSelect={onSelect}
+                      onOpen={onOpen}
+                      onContextMenuOpen={onContextMenuOpen}
+                      onTagOverflowClick={onTagOverflowClick}
+                      issueTitle={dirIssueMap?.[directories[item.index].path]?.title ?? null}
+                      onIssueClick={handleCardIssueClick}
+                    />
+                  </div>
+                ))}
+              </div>
             )}
           </div>
         </>
@@ -185,3 +212,5 @@ export default function Sidebar({
     </aside>
   );
 }
+
+export default memo(Sidebar);

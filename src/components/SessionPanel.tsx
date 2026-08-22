@@ -10,6 +10,8 @@ interface Props {
   directory: string | null;
   sessions: Session[];
   loading: boolean;
+  /** True while `sessions` still belongs to the previously selected directory. */
+  stale?: boolean;
   onStart: (source: SessionSource) => void;
   onResume: (session: Session) => void;
   onDetail: (session: Session) => void;
@@ -20,7 +22,7 @@ interface Props {
   highlightedSessionKey?: string | null;
 }
 
-export default function SessionPanel({ directory, sessions, loading, onStart, onResume, onDetail, onContextMenu, onSetNote, sessionIssueMap, dirIssueMap, highlightedSessionKey }: Props) {
+export default function SessionPanel({ directory, sessions, loading, stale, onStart, onResume, onDetail, onContextMenu, onSetNote, sessionIssueMap, dirIssueMap, highlightedSessionKey }: Props) {
   const [searchQuery, setSearchQuery] = useState("");
   const [showHidden, setShowHidden] = useState(false);
   const [sourceFilter, setSourceFilter] = useState<"all" | SessionSource>("all");
@@ -66,6 +68,11 @@ export default function SessionPanel({ directory, sessions, loading, onStart, on
     ["all", "全部", sessions.length],
     ...SESSION_SOURCES.map(source => [source, sourceLabel(source), sourceCounts[source]] as [SessionSource, string, number]),
   ];
+
+  // While fetching another directory's sessions, keep the old list visible
+  // (dimmed) instead of unmounting it for a spinner — that swap is what
+  // made the panel flash on every directory switch.
+  const dim = !!loading && !!stale;
 
   if (!directory) {
     return (
@@ -138,8 +145,11 @@ export default function SessionPanel({ directory, sessions, loading, onStart, on
         </span>
       </div>
 
-      <div ref={parentRef} className="flex-1 overflow-y-auto">
-        {loading ? (
+      <div
+        ref={parentRef}
+        className={`flex-1 overflow-y-auto transition-opacity duration-150 ${dim ? "opacity-40 pointer-events-none" : ""}`}
+      >
+        {dim && filteredSessions.length === 0 ? (
           <div className="flex items-center justify-center py-16 text-gray-500">
             <Loader2 className="animate-spin mr-2" size={20} />
             Loading sessions...

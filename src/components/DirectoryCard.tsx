@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { FolderKanban, Terminal, Loader2, Pin, AlertCircle, EyeOff, Bug } from "lucide-react";
 import type { DirectoryGroup } from "../types";
 
@@ -7,20 +8,21 @@ interface Props {
   directory: DirectoryGroup;
   isSelected: boolean;
   isGenerating: boolean;
-  onSelect: () => void;
-  onOpen: () => void;
+  onSelect: (path: string) => void;
+  onOpen: (path: string) => void;
   onContextMenuOpen: (path: string, x: number, y: number) => void;
   onTagOverflowClick: (path: string, x: number, y: number) => void;
   issueTitle?: string | null;
-  onIssueClick?: () => void;
+  onIssueClick?: (path: string) => void;
 }
 
-export default function DirectoryCard({
+function DirectoryCard({
   directory, isSelected, isGenerating, onSelect, onOpen, onContextMenuOpen, onTagOverflowClick, issueTitle, onIssueClick,
 }: Props) {
   const displayName = directory.is_worktree
     ? `${directory.repo_name ?? directory.name} (${directory.branch_name ?? directory.name})`
     : directory.name;
+  const { path } = directory;
 
   return (
     <div
@@ -29,8 +31,8 @@ export default function DirectoryCard({
           ? "bg-surface-hover border-l-indigo-500"
           : "border-l-transparent hover:bg-surface-hover"
       } ${directory.hidden && !isSelected ? "opacity-50" : ""} ${directory.is_missing && !isSelected ? "opacity-40" : ""}`}
-      onClick={onSelect}
-      onContextMenu={e => { e.preventDefault(); onContextMenuOpen(directory.path, e.clientX, e.clientY); }}
+      onClick={() => onSelect(path)}
+      onContextMenu={e => { e.preventDefault(); onContextMenuOpen(path, e.clientX, e.clientY); }}
     >
       <div className="flex items-center justify-between mb-1">
         <div className="flex items-center min-w-0 gap-2">
@@ -40,7 +42,7 @@ export default function DirectoryCard({
           {directory.hidden && <EyeOff size={12} className="text-gray-500 flex-shrink-0" />}
           {issueTitle && (
             <button
-              onClick={e => { e.stopPropagation(); onIssueClick?.(); }}
+              onClick={e => { e.stopPropagation(); onIssueClick?.(path); }}
               className="text-amber-400 hover:text-amber-300 transition-colors flex-shrink-0"
               title={issueTitle}
             >
@@ -80,7 +82,7 @@ export default function DirectoryCard({
 
         <div className="flex items-center gap-1.5 flex-shrink-0">
           <button
-            onClick={e => { e.stopPropagation(); onOpen(); }}
+            onClick={e => { e.stopPropagation(); onOpen(path); }}
             className="text-xs text-gray-400 hover:text-gray-200 flex items-center gap-1 transition-colors"
           >
             <Terminal size={12} />
@@ -96,7 +98,7 @@ export default function DirectoryCard({
               {directory.tags.length > MAX_VISIBLE_TAGS && (
                 <button
                   className="text-xs text-gray-500 bg-surface-border rounded-full px-2 py-0.5 hover:bg-surface-hover transition-colors cursor-pointer"
-                  onClick={e => { e.stopPropagation(); onTagOverflowClick(directory.path, e.clientX, e.clientY); }}
+                  onClick={e => { e.stopPropagation(); onTagOverflowClick(path, e.clientX, e.clientY); }}
                 >
                   +{directory.tags.length - MAX_VISIBLE_TAGS}
                 </button>
@@ -108,3 +110,5 @@ export default function DirectoryCard({
     </div>
   );
 }
+
+export default memo(DirectoryCard);

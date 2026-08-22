@@ -1,15 +1,23 @@
+import { useMemo, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { DirectoryListResponse, Session, SessionDetail, SessionSource, SourceStatuses, Summary, Issue, IssueWithSessions, IssueComment } from "../types";
 
 export function useCommands(onAfterCommand?: () => void) {
-  async function wrap<T>(fn: () => Promise<T>): Promise<T> {
-    const result = await fn();
-    onAfterCommand?.();
-    return result;
-  }
+  // Keep the returned functions referentially stable across renders so that
+  // memoized components and useCallback deps downstream don't churn.
+  const cbRef = useRef(onAfterCommand);
+  cbRef.current = onAfterCommand;
 
-  return {
-    listDirectories: () => invoke<DirectoryListResponse>("list_directories"),
+  return useMemo(() => {
+    async function wrap<T>(fn: () => Promise<T>): Promise<T> {
+      const result = await fn();
+      cbRef.current?.();
+      return result;
+    }
+
+    return {
+      listDirectories: (includeMissing?: boolean) =>
+        invoke<DirectoryListResponse>("list_directories", { includeMissing: includeMissing ?? null }),
     getSourceStatuses: () => invoke<SourceStatuses>("get_source_statuses"),
     getSessions: (directory: string) => invoke<Session[]>("get_sessions", { directory }),
     getSessionDetail: (sessionSource: SessionSource, sessionId: string) => invoke<SessionDetail>("get_session_detail", { sessionSource, sessionId }),
@@ -80,5 +88,6 @@ export function useCommands(onAfterCommand?: () => void) {
       wrap(() => invoke<void>("unlink_directory_from_issue", { directory })),
     getDirectoryIssue: (directory: string) =>
       wrap(() => invoke<Issue | null>("get_directory_issue", { directory })),
-  };
+    };
+  }, []);
 }

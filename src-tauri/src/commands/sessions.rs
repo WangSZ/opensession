@@ -4,18 +4,39 @@ use crate::session_sources::SessionSource;
 use super::git_info;
 use super::meta;
 
-#[tauri::command]
-pub async fn list_directories(app: tauri::AppHandle) -> Result<DirectoryListResponse, String> {
+/// Shared pipeline: cached source groups + fresh meta/git overlay.
+/// `apply_cached_and_hide` must see missing groups (it auto-hides dead
+/// worktrees), so filtering happens after it runs.
+fn build_directory_list(
+    app: &tauri::AppHandle,
+) -> Result<(Vec<DirectoryGroup>, SourceStatuses), String> {
     let (mut groups, statuses) =
         crate::session_repository::list_directory_groups_with_statuses()?;
     meta::merge_into(&mut groups);
     let stale = git_info::apply_cached_and_hide(&mut groups);
     if !stale.is_empty() {
-        git_info::spawn_refresh(app, stale);
+        git_info::spawn_refresh(app.clone(), stale);
+    }
+    Ok((groups, statuses))
+}
+
+#[tauri::command]
+pub async fn list_directories(
+    app: tauri::AppHandle,
+    include_missing: Option<bool>,
+) -> Result<DirectoryListResponse, String> {
+    let include_missing = include_missing.unwrap_or(false);
+    let (mut groups, statuses) = build_directory_list(&app)?;
+    let total_count = groups.len();
+    if !include_missing {
+        // Missing directories are only needed for the "show hidden" view;
+        // dropping them here avoids shipping ~1MB of dead entries per reload.
+        groups.retain(|g| !g.is_missing);
     }
     Ok(DirectoryListResponse {
         directories: groups,
         statuses,
+        total_count,
     })
 }
 
@@ -29,9 +50,7 @@ pub async fn search_directories(
     _app: tauri::AppHandle,
     query: String,
 ) -> Result<Vec<DirectoryGroup>, String> {
-    let mut groups = crate::session_repository::list_directory_groups()?;
-    meta::merge_into(&mut groups);
-    git_info::apply_cached_and_hide(&mut groups);
+    let (groups, _) = build_directory_list(&_app)?;
     let query_lower = query.to_lowercase();
     Ok(groups
         .into_iter()

@@ -30,6 +30,9 @@ pub struct SourceStatuses {
 pub struct DirectoryListResponse {
     pub directories: Vec<DirectoryGroup>,
     pub statuses: SourceStatuses,
+    /// Number of groups before missing-directory filtering.
+    #[serde(default)]
+    pub total_count: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
