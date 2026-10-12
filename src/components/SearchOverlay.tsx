@@ -236,7 +236,7 @@ export default function SearchOverlay({ onClose }: Props) {
           <input
             autoFocus
             className="flex-1 min-w-0 bg-transparent text-base text-gray-100 placeholder-gray-600 focus:outline-none"
-            placeholder={mode === "name" ? "搜索文件名…" : "全文搜索…"}
+            placeholder={mode === "name" ? "搜索文件名，支持 * 通配符，如 *.rs…" : "全文搜索…"}
             value={query}
             onChange={e => setQuery(e.target.value)}
           />

@@ -252,27 +252,231 @@ mod tests {
         // plain query with no radical counterparts -> no variants
         assert!(expand_query_variants("resume").is_empty());
     }
+
+    #[test]
+    fn name_mode_without_wildcard_keeps_name_flag() {
+        let jobs = build_mdfind_args(&[], "readme", SearchMode::Name);
+        assert_eq!(jobs.len(), 1);
+        assert_eq!(
+            jobs[0].args,
+            vec![MDFIND_BIN.to_string(), "-name".to_string(), "readme".to_string()]
+        );
+        assert!(jobs[0].name_glob.is_none());
+    }
+
+    #[test]
+    fn name_mode_with_wildcard_builds_conjunction_expression() {
+        let jobs = build_mdfind_args(&["/tmp".to_string()], "sop*.pdf", SearchMode::Name);
+        assert_eq!(jobs.len(), 1);
+        assert_eq!(
+            jobs[0].args,
+            vec![
+                MDFIND_BIN.to_string(),
+                "-onlyin".to_string(),
+                "/tmp".to_string(),
+                "kMDItemFSName == \"sop*\"cd && kMDItemFSName == \"*.pdf\"cd".to_string(),
+            ]
+        );
+        assert_eq!(jobs[0].name_glob.as_deref(), Some("sop*.pdf"));
+    }
+
+    #[test]
+    fn name_mode_wildcard_middle_segment_uses_contains() {
+        let jobs = build_mdfind_args(&[], "*config*report*.json", SearchMode::Name);
+        assert_eq!(
+            jobs[0].args,
+            vec![
+                MDFIND_BIN.to_string(),
+                "kMDItemFSName == \"*config*\"cd && kMDItemFSName == \"*report*\"cd && kMDItemFSName == \"*.json\"cd"
+                    .to_string(),
+            ]
+        );
+        assert_eq!(jobs[0].name_glob.as_deref(), Some("*config*report*.json"));
+    }
+
+    #[test]
+    fn name_mode_wildcard_single_anchored_predicate() {
+        let prefix = build_mdfind_args(&[], "report*", SearchMode::Name);
+        assert_eq!(
+            prefix[0].args,
+            vec![MDFIND_BIN.to_string(), "kMDItemFSName == \"report*\"cd".to_string()]
+        );
+        let suffix = build_mdfind_args(&[], "*.rs", SearchMode::Name);
+        assert_eq!(
+            suffix[0].args,
+            vec![MDFIND_BIN.to_string(), "kMDItemFSName == \"*.rs\"cd".to_string()]
+        );
+        let contains = build_mdfind_args(&[], "*sop*", SearchMode::Name);
+        assert_eq!(
+            contains[0].args,
+            vec![MDFIND_BIN.to_string(), "kMDItemFSName == \"*sop*\"cd".to_string()]
+        );
+    }
+
+    #[test]
+    fn name_mode_wildcard_escapes_quotes_and_backslashes() {
+        // raw query: a"b*c\d — both `"` and `\` must be escaped inside predicates
+        let jobs = build_mdfind_args(&[], "a\"b*c\\d", SearchMode::Name);
+        assert_eq!(
+            jobs[0].args,
+            vec![
+                MDFIND_BIN.to_string(),
+                "kMDItemFSName == \"a\\\"b*\"cd && kMDItemFSName == \"*c\\\\d\"cd".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn name_mode_star_only_pattern_falls_back_to_literal() {
+        let jobs = build_mdfind_args(&[], "**", SearchMode::Name);
+        assert_eq!(
+            jobs[0].args,
+            vec![MDFIND_BIN.to_string(), "-name".to_string(), "**".to_string()]
+        );
+        assert!(jobs[0].name_glob.is_none());
+    }
+
+    #[test]
+    fn content_mode_passes_query_verbatim() {
+        let jobs = build_mdfind_args(&[], "*.rs", SearchMode::Content);
+        assert_eq!(jobs.len(), 1);
+        assert_eq!(jobs[0].args, vec![MDFIND_BIN.to_string(), "*.rs".to_string()]);
+        assert!(jobs[0].name_glob.is_none());
+    }
+
+    #[test]
+    fn glob_matches_wildcards_case_insensitively() {
+        // the case that Spotlight itself fails on
+        assert!(glob_match_ci("sop*.pdf", "SOP-000476170.pdf"));
+        assert!(glob_match_ci("m*.rs", "mod.rs"));
+        assert!(glob_match_ci("m*d.rs", "mod.rs"));
+        assert!(glob_match_ci("*.rs", "mod.rs"));
+        assert!(glob_match_ci("SOP*", "sop-0009.pdf"));
+        assert!(glob_match_ci("报告*", "报告2026.md"));
+        assert!(glob_match_ci("a**b", "ab"));
+        assert!(glob_match_ci("", ""));
+    }
+
+    #[test]
+    fn glob_rejects_non_matches() {
+        assert!(!glob_match_ci("sop*.pdf", "mysop-x.pdf"));
+        assert!(!glob_match_ci("*.pdf", "mod.rs"));
+        assert!(!glob_match_ci("m?d.rs", "mod.rs"));
+        assert!(!glob_match_ci("sop*", "so"));
+        assert!(!glob_match_ci("abc", "ab"));
+    }
 }
 
-fn build_mdfind_args(directories: &[String], query: &str, mode: SearchMode) -> Vec<Vec<String>> {
+struct SearchJob {
+    args: Vec<String>,
+    /// Case-insensitive glob (`*` only) applied to the file name of each result.
+    /// Spotlight predicates are a necessary-but-not-sufficient approximation of
+    /// the glob (e.g. `ab*b` vs `ab`), so this exact filter is always required.
+    name_glob: Option<String>,
+}
+
+fn contains_wildcard(query: &str) -> bool {
+    query.contains('*')
+}
+
+fn spotlight_string_literal(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        if c == '"' || c == '\\' {
+            out.push('\\');
+        }
+        out.push(c);
+    }
+    out
+}
+
+/// Translate a glob into ONE conjunction of anchored Spotlight predicates:
+/// first literal → prefix `seg*`, last literal → suffix `*seg`, middles →
+/// contains `*seg*`. A mid-pattern `*` cannot be expressed (Spotlight's
+/// tokenization silently breaks `sop*.pdf`-style patterns), hence the local
+/// glob post-filter. Returns None for star-only patterns (no literals).
+fn glob_to_spotlight_query(pattern: &str) -> Option<String> {
+    let segments: Vec<&str> = pattern.split('*').collect();
+    let starts_literal = !pattern.starts_with('*');
+    let ends_literal = !pattern.ends_with('*');
+    let mut preds: Vec<String> = Vec::new();
+    for (i, seg) in segments.iter().enumerate() {
+        if seg.is_empty() {
+            continue;
+        }
+        let lit = spotlight_string_literal(seg);
+        let pred = if i == 0 && starts_literal {
+            format!("kMDItemFSName == \"{}*\"cd", lit)
+        } else if i == segments.len() - 1 && ends_literal {
+            format!("kMDItemFSName == \"*{}\"cd", lit)
+        } else {
+            format!("kMDItemFSName == \"*{}*\"cd", lit)
+        };
+        preds.push(pred);
+    }
+    if preds.is_empty() {
+        None
+    } else {
+        Some(preds.join(" && "))
+    }
+}
+
+/// Two-pointer glob: `*` matches any (possibly empty) sequence, everything
+/// else is literal. Case-insensitive (matches `-name` semantics).
+fn glob_match_ci(pattern: &str, name: &str) -> bool {
+    let p: Vec<char> = pattern.chars().flat_map(|c| c.to_lowercase()).collect();
+    let n: Vec<char> = name.chars().flat_map(|c| c.to_lowercase()).collect();
+    let (mut i, mut j) = (0usize, 0usize);
+    let (mut star, mut mark) = (None, 0usize);
+    while j < n.len() {
+        if i < p.len() && p[i] == n[j] {
+            i += 1;
+            j += 1;
+        } else if i < p.len() && p[i] == '*' {
+            star = Some(i);
+            mark = j;
+            i += 1;
+        } else if let Some(s) = star {
+            i = s + 1;
+            mark += 1;
+            j = mark;
+        } else {
+            return false;
+        }
+    }
+    while i < p.len() && p[i] == '*' {
+        i += 1;
+    }
+    i == p.len()
+}
+
+fn build_mdfind_args(directories: &[String], query: &str, mode: SearchMode) -> Vec<SearchJob> {
     let mut jobs = Vec::new();
-    if directories.is_empty() {
+    let is_name = matches!(mode, SearchMode::Name);
+    let wildcard_expr = if is_name && contains_wildcard(query) {
+        glob_to_spotlight_query(query)
+    } else {
+        None
+    };
+    let name_arg = wildcard_expr.clone().unwrap_or_else(|| query.to_string());
+    let name_glob = wildcard_expr.is_some().then(|| query.to_string());
+    let scopes: Vec<Vec<String>> = if directories.is_empty() {
         // Global search: no -onlyin (all indexed volumes)
+        vec![Vec::new()]
+    } else {
+        directories
+            .iter()
+            .map(|d| vec!["-onlyin".to_string(), d.clone()])
+            .collect()
+    };
+    for scope in scopes {
         let mut args = vec![MDFIND_BIN.to_string()];
-        if matches!(mode, SearchMode::Name) {
+        args.extend(scope);
+        if is_name && wildcard_expr.is_none() {
             args.push("-name".to_string());
         }
-        args.push(query.to_string());
-        jobs.push(args);
-    } else {
-        for dir in directories {
-            let mut args = vec![MDFIND_BIN.to_string(), "-onlyin".to_string(), dir.clone()];
-            if matches!(mode, SearchMode::Name) {
-                args.push("-name".to_string());
-            }
-            args.push(query.to_string());
-            jobs.push(args);
-        }
+        args.push(name_arg.clone());
+        jobs.push(SearchJob { args, name_glob: name_glob.clone() });
     }
     jobs
 }
@@ -321,7 +525,7 @@ pub async fn start_search(
             return Err(e);
         }
     };
-    let mut jobs: Vec<Vec<String>> = Vec::new();
+    let mut jobs: Vec<SearchJob> = Vec::new();
     let mut queries = vec![query.clone()];
     queries.extend(expand_query_variants(&query));
     flog(&format!("scope resolved: dirs={:?} variants={:?}", directories, &queries[1..]));
@@ -333,7 +537,7 @@ pub async fn start_search(
         jobs.extend(build_mdfind_args(&directories, q, mode));
     }
     for j in &jobs {
-        flog(&format!("job: {:?}", j));
+        flog(&format!("job: args={:?} glob={:?}", j.args, j.name_glob));
     }
 
     cancel_search(search_id.clone())?;
@@ -349,11 +553,13 @@ pub async fn start_search(
 
     let (tx, mut rx) = mpsc::channel::<String>(2048);
 
-    for args in jobs {
+    for job in jobs {
         let tx = tx.clone();
         let cancelled = cancelled.clone();
         let children = children.clone();
         tauri::async_runtime::spawn(async move {
+            let args = job.args;
+            let name_glob = job.name_glob;
             let job_desc = args.join(" ");
             let mut cmd = tokio::process::Command::new(&args[0]);
             cmd.args(&args[1..])
@@ -388,6 +594,12 @@ pub async fn start_search(
             while !cancelled.load(Ordering::SeqCst) {
                 match lines.next_line().await {
                     Ok(Some(line)) => {
+                        if let Some(glob) = &name_glob {
+                            let file_name = line.rsplit('/').next().unwrap_or(&line);
+                            if !glob_match_ci(glob, file_name) {
+                                continue;
+                            }
+                        }
                         count += 1;
                         if tx.send(line).await.is_err() {
                             break;

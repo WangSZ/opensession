@@ -85,7 +85,7 @@ Merged directory groups are cached in-process for 1s (`session_repository::list_
 - Linux: `x-terminal-emulator -e bash -c "cd ... && <agent> ..."`
 - The selected `opencode`, `codex`, or `reasonix` CLI must be on `PATH`
 - Clipboard: `navigator.clipboard.writeText()` with `textarea` fallback — no Tauri plugin needed
-- File search uses `/usr/bin/mdfind` (Spotlight). Query variants are expanded for Kangxi radicals (U+2F00–U+2FDF) since Spotlight name matching does not fold them. On macOS the search probes Downloads/Documents/Desktop first: ad-hoc rebuilds change the cdhash and orphan TCC grants, so Spotlight silently filters protected folders until the probe-triggered prompt is granted
+- File search uses `/usr/bin/mdfind` (Spotlight). Query variants are expanded for Kangxi radicals (U+2F00–U+2FDF) since Spotlight name matching does not fold them. In name mode, queries containing `*` are translated to a conjunction of anchored Spotlight predicates (first literal → `seg*`, last → `*seg`, middles → `*seg*`, joined with `&&`) because mid-pattern `*` in a single `kMDItemFSName == "sop*.pdf"cd` / `LIKE` silently fails depending on tokenization. Predicates are only an approximation, so results are additionally glob-filtered locally against the file name (`*` only, case-insensitive; `?` and `[..]` are literal). On macOS the search probes Downloads/Documents/Desktop first: ad-hoc rebuilds change the cdhash and orphan TCC grants, so Spotlight silently filters protected folders until the probe-triggered prompt is granted
 
 ## Tauri Events
 
