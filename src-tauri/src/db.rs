@@ -119,16 +119,122 @@ fn map_session_row(row: &rusqlite::Row, directory: &str) -> rusqlite::Result<Ses
     })
 }
 
+// ---------------------------------------------------------------------------
+// Schema compatibility: OpenCode v1 vs v2
+//
+// v1 stores sessions in `session` and messages as `message` + `part` rows.
+// v2 migrated sessions to `session_v2` and renders messages into a single
+// typed `session_message` JSON stream. Both tables coexist after migration
+// (the v1 rows become a stale snapshot), so we detect the schema at runtime
+// and always prefer v2 rows, falling back to v1 rows that were never
+// migrated. Threaded queries go through a `session` CTE with the same id
+// filter so the v1 correlated subqueries keep working unchanged.
+// ---------------------------------------------------------------------------
+
+fn detect_schema(conn: &Connection) -> &'static str {
+    let has = |name: &str| -> bool {
+        conn.query_row(
+            "SELECT 1 FROM sqlite_master WHERE type IN ('table', 'view') AND name = ?1",
+            [name],
+            |_| Ok(()),
+        )
+        .is_ok()
+    };
+    if has("session_v2") {
+        "v2"
+    } else {
+        "v1"
+    }
+}
+
+/// `FROM` fragment selecting sessions with v2 priority and v1 fallback.
+/// `session_v2` has columns the v1 table lacks (fork, suspension tracking),
+/// so both sides are aligned explicitly and the extras are NULL-padded on the
+/// v1 side; `UNION ALL` + `NOT EXISTS` gives rows the v2 shape and stale v1
+/// copies only surface when they were never migrated.
+fn session_source(schema: &str) -> &'static str {
+    match schema {
+        "v2" => {
+            "(SELECT id, project_id, workspace_id, parent_id, fork_session_id, fork_boundary,
+                     slug, directory, path, title, version, share_url,
+                     summary_additions, summary_deletions, summary_files, summary_diffs, metadata,
+                     cost, tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write,
+                     revert, permission, agent, model,
+                     time_created, time_updated, time_compacting, time_archived,
+                     time_suspended, resume_attempts, time_idle, time_viewed, idle_outcome
+              FROM session_v2
+              UNION ALL
+              SELECT id, project_id, workspace_id, parent_id,
+                     NULL, NULL,
+                     slug, directory, path, title, version, share_url,
+                     summary_additions, summary_deletions, summary_files, summary_diffs, metadata,
+                     cost, tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write,
+                     revert, permission, agent, model,
+                     time_created, time_updated, time_compacting, time_archived,
+                     NULL, 0, NULL, NULL, NULL
+              FROM session
+              WHERE NOT EXISTS (SELECT 1 FROM session_v2 v2 WHERE v2.id = session.id))"
+        }
+        _ => "(SELECT * FROM session)",
+    }
+}
+
+/// CTE definition carrying the same selection, so queries can address
+/// sessions as `__oc_sessions` while v1 correlated subqueries keep
+/// referencing `s.id` unchanged.
+fn session_definition(schema: &str) -> String {
+    format!("WITH __oc_sessions AS {} ", session_source(schema))
+}
+
+/// Correlated subquery yielding the raw JSON of the first user text message,
+/// shaped so `extract_text_from_part` can read it in both schemas.
+///
+/// In mixed databases every v2 row reads `session_message` first, falling
+/// back to the v1 `message`/`part` tables for rows that were never migrated.
+/// The v1 fallback must live here as literals because the `message` name is
+/// shadowed by the caller's CTE.
+fn first_user_text_expr(schema: &str) -> &'static str {
+    match schema {
+        "v2" => {
+            "COALESCE(
+                (SELECT sm.data FROM session_message sm
+                 WHERE sm.session_id = s.id AND sm.type = 'user'
+                 ORDER BY sm.seq ASC LIMIT 1),
+                (SELECT p.data FROM part p
+                 JOIN message m ON p.message_id = m.id
+                 WHERE m.session_id = s.id
+                 AND json_extract(m.data, '$.role') = 'user'
+                 AND json_extract(p.data, '$.type') = 'text'
+                 ORDER BY m.time_created ASC
+                 LIMIT 1))"
+        }
+        _ => {
+            "(SELECT p.data FROM part p
+              JOIN message m ON p.message_id = m.id
+              WHERE m.session_id = s.id
+              AND json_extract(m.data, '$.role') = 'user'
+              AND json_extract(p.data, '$.type') = 'text'
+              ORDER BY m.time_created ASC
+              LIMIT 1)"
+        }
+    }
+}
+
 pub fn list_directory_groups() -> Result<Vec<DirectoryGroup>, String> {
     let conn = open_connection()?;
+    list_directory_groups_with_conn(&conn)
+}
+
+fn list_directory_groups_with_conn(conn: &Connection) -> Result<Vec<DirectoryGroup>, String> {
+    let source = session_source(detect_schema(conn));
     let mut stmt = conn
-        .prepare(
+        .prepare(&format!(
             "SELECT directory, COUNT(*) as cnt, MAX(time_updated) as max_t, SUM(cost) as total_cost
-             FROM session
+             FROM {source}
              WHERE parent_id IS NULL
              GROUP BY directory
-             ORDER BY max_t DESC",
-        )
+             ORDER BY max_t DESC"
+        ))
         .map_err(|e| format!("Failed to prepare query: {}", e))?;
 
     let summaries = read_cached_summaries();
@@ -188,21 +294,23 @@ pub fn list_directory_groups() -> Result<Vec<DirectoryGroup>, String> {
 
 pub fn get_sessions(directory: &str) -> Result<Vec<Session>, String> {
     let conn = open_connection()?;
+    get_sessions_with_conn(&conn, directory)
+}
+
+fn get_sessions_with_conn(conn: &Connection, directory: &str) -> Result<Vec<Session>, String> {
+    let schema = detect_schema(conn);
+    let cte = session_definition(schema);
+    let first_expr = first_user_text_expr(schema);
     let mut stmt = conn
-        .prepare(
-            "SELECT s.id, s.slug, s.title, s.agent, s.model, s.cost, s.tokens_input, s.tokens_output,
+        .prepare(&format!(
+            "{cte}
+             SELECT s.id, s.slug, s.title, s.agent, s.model, s.cost, s.tokens_input, s.tokens_output,
                     s.summary_additions, s.summary_deletions, s.parent_id, s.time_created, s.time_updated,
-                    (SELECT p.data FROM part p
-                     JOIN message m ON p.message_id = m.id
-                     WHERE m.session_id = s.id
-                     AND json_extract(m.data, '$.role') = 'user'
-                     AND json_extract(p.data, '$.type') = 'text'
-                     ORDER BY m.time_created ASC
-                     LIMIT 1)
-             FROM session s
+                    {first_expr}
+             FROM __oc_sessions s
              WHERE s.directory = ?1
-             ORDER BY s.time_created DESC",
-        )
+             ORDER BY s.time_created DESC"
+        ))
         .map_err(|e| format!("Failed to prepare query: {}", e))?;
 
     let sessions = stmt
@@ -216,21 +324,26 @@ pub fn get_sessions(directory: &str) -> Result<Vec<Session>, String> {
 
 pub fn get_session_by_id(session_id: &str) -> Result<(Session, String), String> {
     let conn = open_connection()?;
+    get_session_by_id_with_conn(&conn, session_id)
+}
+
+fn get_session_by_id_with_conn(
+    conn: &Connection,
+    session_id: &str,
+) -> Result<(Session, String), String> {
+    let schema = detect_schema(conn);
+    let cte = session_definition(schema);
+    let first_expr = first_user_text_expr(schema);
     let mut stmt = conn
-        .prepare(
-            "SELECT s.id, s.slug, s.title, s.agent, s.model, s.cost, s.tokens_input, s.tokens_output,
+        .prepare(&format!(
+            "{cte}
+             SELECT s.id, s.slug, s.title, s.agent, s.model, s.cost, s.tokens_input, s.tokens_output,
                     s.summary_additions, s.summary_deletions, s.parent_id, s.time_created, s.time_updated,
                     s.directory,
-                    (SELECT p.data FROM part p
-                     JOIN message m ON p.message_id = m.id
-                     WHERE m.session_id = s.id
-                     AND json_extract(m.data, '$.role') = 'user'
-                     AND json_extract(p.data, '$.type') = 'text'
-                     ORDER BY m.time_created ASC
-                     LIMIT 1)
-             FROM session s
-             WHERE s.id = ?1",
-        )
+                    {first_expr}
+             FROM __oc_sessions s
+             WHERE s.id = ?1"
+        ))
         .map_err(|e| format!("Failed to prepare query: {}", e))?;
 
     let (session, model_provider) = stmt
@@ -302,37 +415,62 @@ fn extract_text_from_part(data_str: &str) -> Option<String> {
 }
 
 pub fn get_first_user_text(session_id: &str, conn: &Connection) -> Option<String> {
-    let mut stmt = conn
-        .prepare(
-            "SELECT p.data FROM part p
-             JOIN message m ON p.message_id = m.id
-             WHERE m.session_id = ?1
-             AND json_extract(m.data, '$.role') = 'user'
-             AND json_extract(p.data, '$.type') = 'text'
-             ORDER BY m.time_created ASC
-             LIMIT 1",
-        )
-        .ok()?;
-
-    stmt.query_row([session_id], |row| {
-        let data_str: String = row.get(0)?;
-        Ok(extract_text_from_part(&data_str).unwrap_or_default())
-    })
-    .ok()
+    let legacy_query = "SELECT p.data FROM part p
+         JOIN message m ON p.message_id = m.id
+         WHERE m.session_id = ?1
+         AND json_extract(m.data, '$.role') = 'user'
+         AND json_extract(p.data, '$.type') = 'text'
+         ORDER BY m.time_created ASC
+         LIMIT 1";
+    let data_str: Option<String> = match detect_schema(conn) {
+        "v2" => conn
+            .query_row(
+                "SELECT sm.data FROM session_message sm
+                 WHERE sm.session_id = ?1 AND sm.type = 'user'
+                 ORDER BY sm.seq ASC LIMIT 1",
+                [session_id],
+                |row| row.get(0),
+            )
+            .ok()
+            .or_else(|| {
+                conn.query_row(legacy_query, [session_id], |row| row.get(0))
+                    .ok()
+            }),
+        _ => conn
+            .query_row(legacy_query, [session_id], |row| row.get(0))
+            .ok(),
+    };
+    data_str.and_then(|raw| extract_text_from_part(&raw))
 }
 
 pub fn get_session_detail(session_id: &str) -> Result<SessionDetail, String> {
-    let (session, model_provider) = get_session_by_id(session_id)?;
-
     let conn = open_connection()?;
+    get_session_detail_with_conn(&conn, session_id)
+}
 
-    let messages_count: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM message WHERE session_id = ?1",
-            [session_id],
-            |row| row.get(0),
-        )
-        .map_err(|e| format!("Failed to count messages: {}", e))?;
+fn get_session_detail_with_conn(
+    conn: &Connection,
+    session_id: &str,
+) -> Result<SessionDetail, String> {
+    let (session, model_provider) = get_session_by_id_with_conn(conn, session_id)?;
+
+    let messages_count: i64 = match detect_schema(conn) {
+        "v2" => conn
+            .query_row(
+                "SELECT COUNT(*) FROM session_message
+                 WHERE session_id = ?1 AND type IN ('user', 'assistant')",
+                [session_id],
+                |row| row.get(0),
+            )
+            .map_err(|e| format!("Failed to count messages: {}", e))?,
+        _ => conn
+            .query_row(
+                "SELECT COUNT(*) FROM message WHERE session_id = ?1",
+                [session_id],
+                |row| row.get(0),
+            )
+            .map_err(|e| format!("Failed to count messages: {}", e))?,
+    };
 
     Ok(SessionDetail {
         first_message: session.first_message.clone(),
@@ -342,27 +480,11 @@ pub fn get_session_detail(session_id: &str) -> Result<SessionDetail, String> {
     })
 }
 
-pub fn get_session_directory(session_id: &str) -> Result<Option<String>, String> {
-    let conn = open_connection()?;
-    conn.query_row(
-        "SELECT directory FROM session WHERE id = ?1",
-        [session_id],
-        |row| row.get::<_, String>(0),
-    )
-    .map(Some)
-    .or_else(|e| {
-        if e == rusqlite::Error::QueryReturnedNoRows {
-            Ok(None)
-        } else {
-            Err(format!("Failed to get session directory: {}", e))
-        }
-    })
-}
-
 pub fn get_session_count_for_directory(directory: &str) -> Result<i64, String> {
     let conn = open_connection()?;
+    let source = session_source(detect_schema(&conn));
     conn.query_row(
-        "SELECT COUNT(*) FROM session WHERE directory = ?1 AND parent_id IS NULL",
+        &format!("SELECT COUNT(*) FROM {source} WHERE directory = ?1 AND parent_id IS NULL"),
         [directory],
         |row| row.get(0),
     )
@@ -376,9 +498,10 @@ pub fn get_session_summaries_by_ids(
         return Ok(HashMap::new());
     }
     let conn = open_connection()?;
+    let source = session_source(detect_schema(&conn));
     let placeholders: Vec<String> = (0..session_ids.len()).map(|_| "?".to_string()).collect();
     let sql = format!(
-        "SELECT id, title, directory, time_created, time_updated, cost FROM session WHERE id IN ({})",
+        "SELECT id, title, directory, time_created, time_updated, cost FROM {source} WHERE id IN ({})",
         placeholders.join(",")
     );
     let mut stmt = conn
@@ -411,13 +534,14 @@ pub fn get_session_summaries_by_ids(
 
 pub fn get_recent_session_titles(directory: &str, limit: i64) -> Result<Vec<String>, String> {
     let conn = open_connection()?;
+    let source = session_source(detect_schema(&conn));
     let mut stmt = conn
-        .prepare(
-            "SELECT title FROM session
+        .prepare(&format!(
+            "SELECT title FROM {source}
              WHERE directory = ?1
              ORDER BY time_updated DESC
-             LIMIT ?2",
-        )
+             LIMIT ?2"
+        ))
         .map_err(|e| format!("Failed to prepare query: {}", e))?;
 
     let titles = stmt
@@ -430,4 +554,364 @@ pub fn get_recent_session_titles(directory: &str, limit: i64) -> Result<Vec<Stri
         .collect();
 
     Ok(titles)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const MIGRATION_NOTE: &str = "migrated note";
+
+    fn create_v2_schema(conn: &Connection) {
+        conn.execute_batch(
+            "PRAGMA foreign_keys = OFF;
+             CREATE TABLE session (
+                 id text PRIMARY KEY,
+                 project_id text NOT NULL,
+                 parent_id text,
+                 slug text NOT NULL,
+                 directory text NOT NULL,
+                 title text NOT NULL,
+                 version text NOT NULL,
+                 share_url text,
+                 summary_additions integer,
+                 summary_deletions integer,
+                 summary_files integer,
+                 summary_diffs text,
+                 revert text,
+                 permission text,
+                 time_created integer NOT NULL,
+                 time_updated integer NOT NULL,
+                 time_compacting integer,
+                 time_archived integer,
+                 workspace_id text,
+                 path text,
+                 agent text,
+                 model text,
+                 cost real DEFAULT 0 NOT NULL,
+                 tokens_input integer DEFAULT 0 NOT NULL,
+                 tokens_output integer DEFAULT 0 NOT NULL,
+                 tokens_reasoning integer DEFAULT 0 NOT NULL,
+                 tokens_cache_read integer DEFAULT 0 NOT NULL,
+                 tokens_cache_write integer DEFAULT 0 NOT NULL,
+                 metadata text
+             );
+             CREATE TABLE session_v2 (
+                 id text PRIMARY KEY,
+                 project_id text NOT NULL,
+                 workspace_id text,
+                 parent_id text,
+                 fork_session_id text,
+                 fork_boundary text,
+                 slug text NOT NULL,
+                 directory text NOT NULL,
+                 path text,
+                 title text,
+                 version text NOT NULL,
+                 share_url text,
+                 summary_additions integer,
+                 summary_deletions integer,
+                 summary_files integer,
+                 summary_diffs text,
+                 metadata text,
+                 cost real DEFAULT 0 NOT NULL,
+                 tokens_input integer DEFAULT 0 NOT NULL,
+                 tokens_output integer DEFAULT 0 NOT NULL,
+                 tokens_reasoning integer DEFAULT 0 NOT NULL,
+                 tokens_cache_read integer DEFAULT 0 NOT NULL,
+                 tokens_cache_write integer DEFAULT 0 NOT NULL,
+                 revert text,
+                 permission text,
+                 agent text,
+                 model text,
+                 time_created integer NOT NULL,
+                 time_updated integer NOT NULL,
+                 time_compacting integer,
+                 time_archived integer,
+                 time_suspended integer,
+                 resume_attempts integer DEFAULT 0 NOT NULL,
+                 time_idle integer,
+                 time_viewed integer,
+                 idle_outcome text
+             );
+             CREATE TABLE session_message (
+                 id text PRIMARY KEY,
+                 session_id text NOT NULL,
+                 type text NOT NULL,
+                 seq integer NOT NULL,
+                 time_created integer NOT NULL,
+                 time_updated integer NOT NULL,
+                 data text NOT NULL
+             );
+             CREATE TABLE message (
+                 id text PRIMARY KEY,
+                 session_id text NOT NULL,
+                 time_created integer NOT NULL DEFAULT 0,
+                 time_updated integer NOT NULL DEFAULT 0,
+                 data text NOT NULL
+             );
+             CREATE TABLE part (
+                 id text PRIMARY KEY,
+                 message_id text NOT NULL,
+                 session_id text NOT NULL,
+                 time_created integer NOT NULL DEFAULT 0,
+                 time_updated integer NOT NULL DEFAULT 0,
+                 data text NOT NULL
+             );",
+        )
+        .unwrap();
+    }
+
+    fn create_v1_schema(conn: &Connection) {
+        conn.execute_batch(
+            "CREATE TABLE session (
+                 id text PRIMARY KEY,
+                 project_id text NOT NULL,
+                 parent_id text,
+                 slug text NOT NULL,
+                 directory text NOT NULL,
+                 title text NOT NULL,
+                 version text NOT NULL,
+                 share_url text,
+                 summary_additions integer,
+                 summary_deletions integer,
+                 summary_files integer,
+                 summary_diffs text,
+                 revert text,
+                 permission text,
+                 time_created integer NOT NULL,
+                 time_updated integer NOT NULL,
+                 time_compacting integer,
+                 time_archived integer,
+                 workspace_id text,
+                 path text,
+                 agent text,
+                 model text,
+                 cost real DEFAULT 0 NOT NULL,
+                 tokens_input integer DEFAULT 0 NOT NULL,
+                 tokens_output integer DEFAULT 0 NOT NULL,
+                 tokens_reasoning integer DEFAULT 0 NOT NULL,
+                 tokens_cache_read integer DEFAULT 0 NOT NULL,
+                 tokens_cache_write integer DEFAULT 0 NOT NULL,
+                 metadata text
+             );
+             CREATE TABLE message (
+                 id text PRIMARY KEY,
+                 session_id text NOT NULL,
+                 time_created integer NOT NULL DEFAULT 0,
+                 time_updated integer NOT NULL DEFAULT 0,
+                 data text NOT NULL
+             );
+             CREATE TABLE part (
+                 id text PRIMARY KEY,
+                 message_id text NOT NULL,
+                 session_id text NOT NULL,
+                 time_created integer NOT NULL DEFAULT 0,
+                 time_updated integer NOT NULL DEFAULT 0,
+                 data text NOT NULL
+             );",
+        )
+        .unwrap();
+    }
+
+    fn insert_session_v2(conn: &Connection, id: &str, dir: &str, title: &str, updated: i64) {
+        conn.execute(
+            "INSERT INTO session_v2 (id, project_id, directory, slug, title, version, time_created, time_updated, agent, model)
+             VALUES (?1, 'p', ?2, 'slug', ?3, '2.0', ?4, ?5, 'build', '{\"id\":\"m1\",\"providerID\":\"p1\"}')",
+            params![id, dir, title, updated - 1, updated],
+        )
+        .unwrap();
+    }
+
+    fn insert_session_v1(conn: &Connection, id: &str, dir: &str, title: &str, updated: i64) {
+        conn.execute(
+            "INSERT INTO session (id, project_id, directory, slug, title, version, time_created, time_updated, agent, model)
+             VALUES (?1, 'p', ?2, 'slug', ?3, '1.18', ?4, ?5, 'build', '{\"id\":\"m1\",\"providerID\":\"p1\"}')",
+            params![id, dir, title, updated - 1, updated],
+        )
+        .unwrap();
+    }
+
+    fn insert_session_message(
+        conn: &Connection,
+        id: &str,
+        sid: &str,
+        msg_type: &str,
+        seq: i64,
+        text: &str,
+    ) {
+        let data = format!("{{\"text\":\"{text}\"}}");
+        conn.execute(
+            "INSERT INTO session_message (id, session_id, type, seq, time_created, time_updated, data)
+             VALUES (?1, ?2, ?3, ?4, 1, 1, ?5)",
+            params![id, sid, msg_type, seq, data],
+        )
+        .unwrap();
+    }
+
+    fn insert_legacy_message(
+        conn: &Connection,
+        session_id: &str,
+        msg_id: &str,
+        role: &str,
+        text: &str,
+    ) {
+        conn.execute(
+            "INSERT INTO message (id, session_id, time_created, time_updated, data)
+             VALUES (?1, ?2, 1, 1, ?3)",
+            params![msg_id, session_id, format!("{{\"role\":\"{role}\"}}")],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO part (id, message_id, session_id, time_created, time_updated, data)
+             VALUES (?1, ?2, ?3, 1, 1, ?4)",
+            params![
+                format!("prt_{msg_id}"),
+                msg_id,
+                session_id,
+                format!("{{\"type\":\"text\",\"text\":\"{text}\"}}")
+            ],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn v2_sessions_and_messages_are_read() {
+        let conn = Connection::open_in_memory().unwrap();
+        create_v2_schema(&conn);
+
+        insert_session_v2(&conn, "ses_new", "/repo", "new title", 2_000);
+        insert_session_message(&conn, "msg_1", "ses_new", "user", 1, "hello v2");
+        insert_session_message(&conn, "msg_2", "ses_new", "assistant", 2, "reply");
+        insert_session_message(&conn, "msg_3", "ses_new", "system", 3, "system note");
+
+        assert_eq!(detect_schema(&conn), "v2");
+
+        let sessions = get_sessions_with_conn(&conn, "/repo").unwrap();
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].id, "ses_new");
+        assert_eq!(sessions[0].first_message, "hello v2");
+
+        let detail = get_session_detail_with_conn(&conn, "ses_new").unwrap();
+        assert_eq!(detail.messages_count, Some(2));
+
+        assert_eq!(
+            get_first_user_text("ses_new", &conn).as_deref(),
+            Some("hello v2")
+        );
+    }
+
+    #[test]
+    fn v2_rows_win_over_stale_v1_rows() {
+        let conn = Connection::open_in_memory().unwrap();
+        create_v2_schema(&conn);
+
+        insert_session_v1(&conn, "ses_shared", "/repo", "old title", 1_000);
+        insert_session_v2(&conn, "ses_shared", "/repo", "new title", 3_000);
+        insert_legacy_message(&conn, "ses_shared", "msg_old", "user", "old v1 text");
+        insert_session_message(&conn, "msg_1", "ses_shared", "user", 1, "new v2 text");
+
+        let sessions = get_sessions_with_conn(&conn, "/repo").unwrap();
+        assert_eq!(sessions.len(), 1, "v2 row must not double with its v1 copy");
+        assert_eq!(sessions[0].title, "new title");
+        assert_eq!(sessions[0].first_message, "new v2 text");
+
+        let groups = list_directory_groups_with_conn(&conn).unwrap();
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].session_count, 1);
+    }
+
+    #[test]
+    fn v1_only_rows_are_preserved_when_both_tables_exist() {
+        let conn = Connection::open_in_memory().unwrap();
+        create_v2_schema(&conn);
+
+        insert_session_v2(&conn, "ses_v2", "/repo", "v2 session", 3_000);
+        insert_session_v1(&conn, "ses_left_behind", "/repo", "v1 session", 2_000);
+        insert_session_message(&conn, "msg_1", "ses_v2", "user", 1, "v2 text");
+        insert_legacy_message(&conn, "ses_left_behind", "msg_old", "user", "v1 text");
+
+        let sessions = get_sessions_with_conn(&conn, "/repo").unwrap();
+        assert_eq!(sessions.len(), 2);
+        assert_eq!(
+            sessions
+                .iter()
+                .find(|s| s.id == "ses_left_behind")
+                .unwrap()
+                .first_message,
+            "v1 text"
+        );
+
+        let groups = list_directory_groups_with_conn(&conn).unwrap();
+        assert_eq!(groups[0].session_count, 2);
+
+        assert_eq!(
+            get_first_user_text("ses_left_behind", &conn).as_deref(),
+            Some("v1 text")
+        );
+    }
+
+    #[test]
+    fn v1_only_schema_still_uses_legacy_queries() {
+        let conn = Connection::open_in_memory().unwrap();
+        create_v1_schema(&conn);
+
+        insert_session_v1(&conn, "ses_v1", "/repo", MIGRATION_NOTE, 1_000);
+        insert_legacy_message(&conn, "ses_v1", "msg_1", "user", "legacy text");
+
+        assert_eq!(detect_schema(&conn), "v1");
+
+        let sessions = get_sessions_with_conn(&conn, "/repo").unwrap();
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].first_message, "legacy text");
+
+        let detail = get_session_detail_with_conn(&conn, "ses_v1").unwrap();
+        assert_eq!(detail.messages_count, Some(1));
+
+        assert_eq!(
+            get_first_user_text("ses_v1", &conn).as_deref(),
+            Some("legacy text")
+        );
+    }
+
+    /// The real v2 database gains extra columns (fork, suspension tracking)
+    /// that the v1 table does not have, so the union in `session_source` must
+    /// align both sides explicitly.
+    #[test]
+    fn mixed_union_aligns_differing_real_schemas() {
+        let conn = Connection::open_in_memory().unwrap();
+        create_v2_schema(&conn);
+
+        let columns = |table: &str| -> Vec<String> {
+            let mut stmt = conn
+                .prepare(&format!("PRAGMA table_info({table})"))
+                .unwrap();
+            stmt.query_map([], |row| row.get::<_, String>(1))
+                .unwrap()
+                .filter_map(Result::ok)
+                .collect()
+        };
+        let v1_columns = columns("session");
+        let v2_columns = columns("session_v2");
+        assert!(
+            v2_columns.len() > v1_columns.len(),
+            "fixture must reproduce the real column-count difference"
+        );
+        assert!(v2_columns.contains(&"fork_session_id".to_string()));
+        assert!(!v1_columns.contains(&"fork_session_id".to_string()));
+
+        insert_session_v2(&conn, "ses_new", "/repo", "new", 3_000);
+        insert_session_v1(&conn, "ses_old", "/repo", "old", 2_000);
+        insert_session_message(&conn, "msg_1", "ses_new", "user", 1, "new text");
+        insert_legacy_message(&conn, "ses_old", "msg_old", "user", "old text");
+
+        let sessions = get_sessions_with_conn(&conn, "/repo").unwrap();
+        assert_eq!(sessions.len(), 2);
+
+        let groups = list_directory_groups_with_conn(&conn).unwrap();
+        assert_eq!(groups[0].session_count, 2);
+
+        let detail = get_session_detail_with_conn(&conn, "ses_old").unwrap();
+        assert_eq!(detail.first_message, "old text");
+    }
 }
