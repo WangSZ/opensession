@@ -147,6 +147,11 @@ fn detect_schema(conn: &Connection) -> &'static str {
     }
 }
 
+/// Whether the OpenCode database has been migrated to the v2 schema.
+pub fn is_opencode_v2(conn: &Connection) -> bool {
+    detect_schema(conn) == "v2"
+}
+
 /// `FROM` fragment selecting sessions with v2 priority and v1 fallback.
 /// `session_v2` has columns the v1 table lacks (fork, suspension tracking),
 /// so both sides are aligned explicitly and the extras are NULL-padded on the
@@ -913,5 +918,19 @@ mod tests {
 
         let detail = get_session_detail_with_conn(&conn, "ses_old").unwrap();
         assert_eq!(detail.first_message, "old text");
+    }
+
+    #[test]
+    fn v2_schema_is_detected() {
+        let conn = Connection::open_in_memory().unwrap();
+        create_v2_schema(&conn);
+        assert!(is_opencode_v2(&conn));
+    }
+
+    #[test]
+    fn v1_schema_is_not_v2() {
+        let conn = Connection::open_in_memory().unwrap();
+        create_v1_schema(&conn);
+        assert!(!is_opencode_v2(&conn));
     }
 }

@@ -263,6 +263,60 @@ pub fn remove_worktree(path: String, force: bool) -> Result<(), String> {
     Ok(())
 }
 
+/// OpenCode v2 removed `--fork` from the top-level CLI. Fork via the HTTP API
+/// (`opencode api session.fork`) and return resume args for the new session.
+fn fork_opencode_v2_session(session_id: &str) -> Result<Vec<String>, String> {
+    validate_session_id(session_id)?;
+
+    let output = std::process::Command::new("opencode")
+        .args([
+            "api",
+            "session.fork",
+            "--param",
+            &format!("sessionID={}", session_id),
+            "--data",
+            r#"{"before":null}"#,
+        ])
+        .output()
+        .map_err(|e| format!("Failed to run opencode api fork: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!(
+            "opencode api fork failed: {}",
+            stderr.trim().trim_start_matches("Error: ")
+        ));
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: serde_json::Value = serde_json::from_str(&stdout)
+        .map_err(|e| format!("Failed to parse opencode api fork response: {}", e))?;
+
+    if let Some(error_tag) = parsed.get("_tag").and_then(|v| v.as_str()) {
+        return Err(format!(
+            "opencode api fork error: {} - {}",
+            error_tag,
+            parsed
+                .get("message")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown error")
+        ));
+    }
+
+    let new_id = parsed
+        .get("data")
+        .and_then(|d| d.get("id"))
+        .and_then(|id| id.as_str())
+        .ok_or_else(|| "Fork response missing session id".to_string())?;
+
+    validate_session_id(new_id)?;
+    Ok(session_command(
+        SessionSource::OpenCode,
+        Some(new_id),
+        SessionAction::Resume,
+    ))
+}
+
 #[tauri::command]
 pub fn fork_session(
     directory: String,
@@ -271,7 +325,18 @@ pub fn fork_session(
 ) -> Result<(), String> {
     check_directory_exists(&directory)?;
     validate_session_id(&session_id)?;
-    let args = session_command(session_source, Some(&session_id), SessionAction::Fork);
+
+    let args = if session_source == SessionSource::OpenCode {
+        let conn = crate::db::open_connection()?;
+        if crate::db::is_opencode_v2(&conn) {
+            fork_opencode_v2_session(&session_id)?
+        } else {
+            session_command(session_source, Some(&session_id), SessionAction::Fork)
+        }
+    } else {
+        session_command(session_source, Some(&session_id), SessionAction::Fork)
+    };
+
     launch_cli_in_terminal(&directory, &args, "fork")
 }
 
