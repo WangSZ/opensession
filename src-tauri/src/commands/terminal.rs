@@ -265,20 +265,17 @@ pub fn remove_worktree(path: String, force: bool) -> Result<(), String> {
 
 /// OpenCode v2 removed `--fork` from the top-level CLI. Fork via the HTTP API
 /// (`opencode api session.fork`) and return resume args for the new session.
+///
+/// GUI apps on macOS do not inherit the user's shell PATH, so `opencode` may
+/// not be found when the .app is launched from Finder. We run the API call
+/// through a login shell to pick up the user's PATH/config.
 fn fork_opencode_v2_session(session_id: &str) -> Result<Vec<String>, String> {
     validate_session_id(session_id)?;
 
-    let output = std::process::Command::new("opencode")
-        .args([
-            "api",
-            "session.fork",
-            "--param",
-            &format!("sessionID={}", session_id),
-            "--data",
-            r#"{"before":null}"#,
-        ])
-        .output()
-        .map_err(|e| format!("Failed to run opencode api fork: {}", e))?;
+    let output = run_opencode_command(&format!(
+        "api session.fork --param sessionID={} --data '{{\"before\":null}}'",
+        session_id
+    ))?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -315,6 +312,27 @@ fn fork_opencode_v2_session(session_id: &str) -> Result<Vec<String>, String> {
         Some(new_id),
         SessionAction::Resume,
     ))
+}
+
+/// Run an `opencode` subcommand in the user's shell environment so that GUI
+/// apps launched from Finder can still find `opencode` on PATH.
+fn run_opencode_command(args: &str) -> Result<std::process::Output, String> {
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("cmd")
+            .args(["/c", &format!("opencode {}", args)])
+            .output()
+            .map_err(|e| format!("Failed to run opencode: {}", e))
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
+        std::process::Command::new(&shell)
+            .args(["-ilc", &format!("opencode {}", args)])
+            .output()
+            .map_err(|e| format!("Failed to run opencode: {}", e))
+    }
 }
 
 #[tauri::command]
